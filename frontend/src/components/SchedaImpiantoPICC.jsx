@@ -795,30 +795,29 @@ export const SchedaImpiantoPICC = ({ patientId, ambulatorio, schede, onRefresh, 
               </span>
             ))}
           </div>
-          {/* CVC */}
+          {/* POSIZIONAMENTO: Solo Braccio dx/sn e Vena */}
           <div className="flex items-center gap-1 flex-wrap">
-            <b>CVC:</b>
-            {POSIZIONAMENTO_CVC_OPTIONS.map(opt => (
-              <span key={opt.id} className="flex items-center gap-0.5">
-                <Checkbox checked={data.posizionamento_cvc === opt.id} onCheckedChange={(c) => !readOnly && setFormData(p => ({...p, posizionamento_cvc: c ? opt.id : ''}))} disabled={readOnly} className="h-3 w-3" />
-                <span>{opt.label}</span>
-              </span>
-            ))}
-          </div>
-          {/* PICC */}
-          <div className="flex items-center gap-1 flex-wrap">
-            <b>PICC:</b>
+            <b>BRACCIO:</b>
             <Checkbox checked={data.braccio === 'dx'} onCheckedChange={(c) => !readOnly && setFormData(p => ({...p, braccio: c ? 'dx' : ''}))} disabled={readOnly} className="h-3 w-3" /><span>dx</span>
             <Checkbox checked={data.braccio === 'sn'} onCheckedChange={(c) => !readOnly && setFormData(p => ({...p, braccio: c ? 'sn' : ''}))} disabled={readOnly} className="h-3 w-3" /><span>sn</span>
-            <b className="ml-2">Vena:</b>
+            <b className="ml-3">VENA:</b>
             {VENA_OPTIONS.map(opt => (
               <span key={opt.id} className="flex items-center gap-0.5">
                 <Checkbox checked={data.vena === opt.id} onCheckedChange={(c) => !readOnly && setFormData(p => ({...p, vena: c ? opt.id : ''}))} disabled={readOnly} className="h-3 w-3" />
                 <span>{opt.label}</span>
               </span>
             ))}
+            {data.vena === 'altro' && (
+              <Input 
+                value={data.vena_altro || ''} 
+                onChange={e => setFormData(p => ({...p, vena_altro: e.target.value}))} 
+                disabled={readOnly} 
+                className="h-5 text-[10px] w-24 ml-1" 
+                placeholder="Specificare..."
+              />
+            )}
           </div>
-          {/* Misure catetere */}
+          {/* Misure catetere - SENZA LOTTO */}
           <div className="flex items-center gap-2 flex-wrap text-[10px]">
             <span>Diametro vena:</span>
             <Input value={data.diametro_vena_mm || ''} onChange={e => setFormData(p => ({...p, diametro_vena_mm: e.target.value}))} disabled={readOnly} className="h-5 text-[10px] w-10" placeholder="mm" />
@@ -836,8 +835,6 @@ export const SchedaImpiantoPICC = ({ patientId, ambulatorio, schede, onRefresh, 
             <Input value={data.french || ''} onChange={e => setFormData(p => ({...p, french: e.target.value}))} disabled={readOnly} className="h-5 text-[10px] w-10" />
             <span>Lumi:</span>
             <Input value={data.lumi || ''} onChange={e => setFormData(p => ({...p, lumi: e.target.value}))} disabled={readOnly} className="h-5 text-[10px] w-10" />
-            <span>Lotto:</span>
-            <Input value={data.lotto || ''} onChange={e => setFormData(p => ({...p, lotto: e.target.value}))} disabled={readOnly} className="h-5 text-[10px] w-20" />
           </div>
           {/* PROCEDURE */}
           <div className="grid grid-cols-2 gap-1">
