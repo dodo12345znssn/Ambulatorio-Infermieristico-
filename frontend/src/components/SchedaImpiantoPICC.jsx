@@ -571,6 +571,30 @@ export const SchedaImpiantoPICC = ({ patientId, ambulatorio, schede, onRefresh, 
         />
       </div>
 
+      {/* Lunghezza Catetere - NUOVI CAMPI */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-2">
+          <Label className="font-semibold text-sm">Lunghezza Totale Catetere (cm)</Label>
+          <Input 
+            value={data.lunghezza_totale_cm || ''} 
+            onChange={e => setFormData(p => ({...p, lunghezza_totale_cm: e.target.value}))}
+            disabled={readOnly}
+            placeholder="es. 25"
+            className="h-9"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label className="font-semibold text-sm">Lunghezza Impiantata (cm)</Label>
+          <Input 
+            value={data.lunghezza_impiantata_cm || ''} 
+            onChange={e => setFormData(p => ({...p, lunghezza_impiantata_cm: e.target.value}))}
+            disabled={readOnly}
+            placeholder="es. 21"
+            className="h-9"
+          />
+        </div>
+      </div>
+
       {/* Tunnelizzazione */}
       <div className="space-y-2">
         <div className="flex items-center gap-3">
