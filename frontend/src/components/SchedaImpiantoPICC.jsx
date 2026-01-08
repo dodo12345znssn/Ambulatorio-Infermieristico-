@@ -541,11 +541,11 @@ export const SchedaImpiantoPICC = ({ patientId, ambulatorio, schede, onRefresh, 
 
         <div className="space-y-2">
           <Label className="font-semibold text-sm">Vena *</Label>
-          <div className="flex gap-1.5">
+          <div className="flex gap-1.5 flex-wrap">
             {VENA_OPTIONS.map(opt => (
               <div 
                 key={opt.id}
-                className={`flex-1 p-2 border-2 rounded-lg cursor-pointer text-center text-xs ${
+                className={`px-3 py-2 border-2 rounded-lg cursor-pointer text-center text-xs ${
                   data.vena === opt.id ? 'border-blue-500 bg-blue-50 font-medium' : 'border-gray-200'
                 } ${readOnly ? 'cursor-default opacity-70' : ''}`}
                 onClick={() => !readOnly && setFormData(p => ({...p, vena: opt.id}))}
@@ -554,6 +554,15 @@ export const SchedaImpiantoPICC = ({ patientId, ambulatorio, schede, onRefresh, 
               </div>
             ))}
           </div>
+          {data.vena === 'altro' && (
+            <Input 
+              value={data.vena_altro || ''} 
+              onChange={e => setFormData(p => ({...p, vena_altro: e.target.value}))}
+              disabled={readOnly}
+              placeholder="Specificare la vena..."
+              className="mt-2 h-9"
+            />
+          )}
         </div>
       </div>
 
