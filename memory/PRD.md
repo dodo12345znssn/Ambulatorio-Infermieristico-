@@ -15,6 +15,17 @@ Applicazione web full-stack per la gestione di un ambulatorio infermieristico co
 
 ## Funzionalità Implementate
 
+### Sessione 08/01/2026 - Update 4
+
+#### Stampa PDF Scheda Impianto Completa - Allineamento con Frontend
+- **RIMOSSO**: Campo "Lotto" dalla stampa
+- **RIMOSSO**: Sezione "POSIZIONAMENTO CVC" (succlavia dx/sn, giugulare dx/sn)
+- **RIMOSSO**: Label "POSIZIONAMENTO PICC"
+- **AGGIORNATO**: Sezione posizionamento ora mostra solo:
+  - BRACCIO: dx / sn
+  - VENA: Basilica / Cefalica / Brachiale / Altro (con nota se specificata)
+- La stampa PDF ora riflette esattamente la scheda impianto completa del frontend
+
 ### Sessione 08/01/2026 - Update 3
 
 #### Scheda Gestione PICC - Copia Automatica Medicazione Precedente
