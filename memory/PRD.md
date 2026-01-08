@@ -15,7 +15,19 @@ Applicazione web full-stack per la gestione di un ambulatorio infermieristico co
 
 ## Funzionalità Implementate
 
-### Sessione 08/01/2026
+### Sessione 08/01/2026 - Update 2
+
+#### Statistiche - Esclusione Pazienti Non Presentati
+- Le prestazioni dei pazienti segnati in rosso (stato `non_presentato`) vengono automaticamente escluse dalle statistiche
+- Il conteggio di accessi, pazienti unici e prestazioni considera solo gli appuntamenti effettuati o da_fare
+- Questa logica si applica sia alle statistiche MED/PICC che al dettaglio mensile
+
+#### Agenda - Pre-selezione Prestazioni PICC
+- Quando si aggiunge un appuntamento PICC per un paziente PICC o PICC_MED
+- Le prestazioni "Medicazione semplice" e "Irrigazione catetere" vengono pre-selezionate automaticamente
+- L'utente può comunque deselezionare una delle due prestazioni prima di confermare
+
+### Sessione 08/01/2026 - Update 1
 
 #### Agenda - Gestione Appuntamenti Avanzata
 - Nome paziente grande e visibile (font-bold text-base)
