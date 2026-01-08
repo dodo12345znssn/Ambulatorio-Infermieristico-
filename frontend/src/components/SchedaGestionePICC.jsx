@@ -309,13 +309,16 @@ export const SchedaGestionePICC = ({ patientId, ambulatorio, schede, onRefresh, 
     }
     
     let newColumns;
+    let insertIdx;
     if (position !== null) {
       // Insert at specific position
       newColumns = [...columns];
       newColumns.splice(position, 0, dateStr);
+      insertIdx = position;
     } else {
       // Add and sort
       newColumns = [...columns, dateStr].sort();
+      insertIdx = newColumns.indexOf(dateStr);
     }
     
     // Auto-populate the date field in the new column
@@ -323,12 +326,31 @@ export const SchedaGestionePICC = ({ patientId, ambulatorio, schede, onRefresh, 
     const month = parseInt(dateStr.split("-")[1]);
     const dateValue = `${day}/${month}`;
     
+    // NUOVA FUNZIONALITÀ: Copia automatica dalla medicazione precedente
+    // Se esiste una colonna precedente con dati, copia tutti i dati (eccetto la data)
+    let newColumnData = { data_giorno_mese: dateValue };
+    
+    // Trova la colonna precedente più vicina che ha dati
+    const sortedExistingColumns = [...columns].sort();
+    const previousColumns = sortedExistingColumns.filter(col => col < dateStr);
+    
+    if (previousColumns.length > 0) {
+      // Prendi l'ultima colonna precedente (la più vicina alla nuova data)
+      const lastPreviousCol = previousColumns[previousColumns.length - 1];
+      const previousData = columnData[lastPreviousCol];
+      
+      if (previousData && Object.keys(previousData).length > 0) {
+        // Copia tutti i dati eccetto data_giorno_mese
+        const { data_giorno_mese, ...restData } = previousData;
+        newColumnData = { ...restData, data_giorno_mese: dateValue };
+        toast.success("Dati copiati dalla medicazione precedente", { duration: 2000 });
+      }
+    }
+    
     setColumns(newColumns);
     setColumnData(prev => ({ 
       ...prev, 
-      [dateStr]: { 
-        data_giorno_mese: dateValue 
-      } 
+      [dateStr]: newColumnData 
     }));
     setInsertPosition(null);
   };
