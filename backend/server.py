@@ -953,27 +953,21 @@ def generate_scheda_impianto_pdf(scheda: dict, patient: dict) -> bytes:
     story.append(Paragraph(tipo_line, small_style))
     story.append(Spacer(1, 2))
     
-    # POSIZIONAMENTO CVC
-    pos_cvc = get_val('posizionamento_cvc')
-    cvc_opts = [("succlavia_dx", "succlavia dx"), ("succlavia_sn", "succlavia sn"), 
-                ("giugulare_dx", "giugulare interna dx"), ("giugulare_sn", "giugulare interna sn"), ("altro", "altro")]
-    pos_line = "<b>POSIZIONAMENTO CVC:</b> " + "  ".join([f"{cb(pos_cvc == opt[0])} {opt[1]}" for opt in cvc_opts])
-    if pos_cvc == 'altro':
-        pos_line += f" specificare: {get_val('posizionamento_cvc_altro')}"
-    story.append(Paragraph(pos_line, small_style))
-    story.append(Spacer(1, 2))
-    
-    # POSIZIONAMENTO PICC con nuovi campi
+    # POSIZIONAMENTO: Solo Braccio e Vena (semplificato come da frontend)
     braccio = get_val('braccio')
     vena = get_val('vena')
-    picc_line = f"<b>POSIZIONAMENTO PICC:</b> {cb(braccio == 'dx')} braccio dx  {cb(braccio == 'sn')} braccio sn    <b>Vena:</b> {cb(vena == 'basilica')} basilica  {cb(vena == 'cefalica')} cefalica  {cb(vena == 'brachiale')} brachiale"
-    story.append(Paragraph(picc_line, small_style))
+    vena_altro = get_val('vena_altro')
+    pos_line = f"<b>BRACCIO:</b> {cb(braccio == 'dx')} dx  {cb(braccio == 'sn')} sn    <b>VENA:</b> {cb(vena == 'basilica')} Basilica  {cb(vena == 'cefalica')} Cefalica  {cb(vena == 'brachiale')} Brachiale  {cb(vena == 'altro')} Altro"
+    if vena == 'altro' and vena_altro:
+        pos_line += f" ({vena_altro})"
+    story.append(Paragraph(pos_line, small_style))
     
     # Nuovi campi misure catetere
     misure_line = f"<b>Diametro vena:</b> {get_val('diametro_vena_mm')} mm    <b>Profondità:</b> {get_val('profondita_cm')} cm    <b>Exit-site:</b> {get_val('exit_site_cm')} cm"
     story.append(Paragraph(misure_line, small_style))
     
-    catetere_line = f"<b>Lunghezza totale:</b> {get_val('lunghezza_totale_cm')} cm    <b>Lunghezza impiantata:</b> {get_val('lunghezza_impiantata_cm')} cm    <b>French:</b> {get_val('french')}    <b>Lumi:</b> {get_val('lumi')}    <b>Lotto:</b> {get_val('lotto')}"
+    # Misure catetere SENZA LOTTO
+    catetere_line = f"<b>Lunghezza totale:</b> {get_val('lunghezza_totale_cm')} cm    <b>Lunghezza impiantata:</b> {get_val('lunghezza_impiantata_cm')} cm    <b>French:</b> {get_val('french')}    <b>Lumi:</b> {get_val('lumi')}"
     story.append(Paragraph(catetere_line, small_style))
     story.append(Spacer(1, 3))
     
