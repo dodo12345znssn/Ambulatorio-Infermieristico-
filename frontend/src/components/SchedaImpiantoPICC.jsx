@@ -48,20 +48,17 @@ const TIPO_IMPIANTO_SEMPLICE = [
   { id: "midline", label: "Midline" },
 ];
 
-// Opzioni posizionamento CVC
+// Opzioni posizionamento CVC - RIMOSSO, non più usato nella scheda completa
 const POSIZIONAMENTO_CVC_OPTIONS = [
-  { id: "succlavia_dx", label: "succlavia dx" },
-  { id: "succlavia_sn", label: "succlavia sn" },
-  { id: "giugulare_dx", label: "giugulare interna dx" },
-  { id: "giugulare_sn", label: "giugulare interna sn" },
   { id: "altro", label: "altro" },
 ];
 
-// Opzioni vena PICC
+// Opzioni vena - AGGIORNATO con "Altro"
 const VENA_OPTIONS = [
   { id: "basilica", label: "Basilica" },
   { id: "cefalica", label: "Cefalica" },
   { id: "brachiale", label: "Brachiale" },
+  { id: "altro", label: "Altro" },
 ];
 
 // Opzioni disinfezione
