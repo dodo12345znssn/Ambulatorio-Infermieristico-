@@ -234,6 +234,13 @@ export default function AgendaPage() {
     setSelectedPatient(patient);
     setSearchQuery(`${patient.cognome} ${patient.nome}`);
     setFilteredPatients([]);
+    
+    // Auto-seleziona prestazioni per pazienti PICC
+    // I pazienti PICC (o PICC_MED quando si prenota in slot PICC) avranno 
+    // automaticamente medicazione e irrigazione pre-selezionate
+    if (selectedSlot?.tipo === "PICC" && (patient.tipo === "PICC" || patient.tipo === "PICC_MED")) {
+      setSelectedPrestazioni(["medicazione_semplice", "irrigazione_catetere"]);
+    }
   };
 
   const handlePrestazioneToggle = (prestazioneId) => {
