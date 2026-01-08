@@ -15,6 +15,27 @@ Applicazione web full-stack per la gestione di un ambulatorio infermieristico co
 
 ## Funzionalità Implementate
 
+### Sessione 08/01/2026 - Update 3
+
+#### Scheda Gestione PICC - Copia Automatica Medicazione Precedente
+- Quando si aggiunge un nuovo giorno alla scheda mensile, i dati vengono copiati automaticamente dalla medicazione precedente
+- La data viene sempre aggiornata al nuovo giorno
+- L'utente può comunque modificare tutti i campi
+- Messaggio di conferma "Dati copiati dalla medicazione precedente"
+
+#### Scheda Impianto PICC Semplificata - Nuovi Campi
+- Aggiunto campo "Lunghezza Totale Catetere" (cm) - es. 25 cm
+- Aggiunto campo "Lunghezza Impiantata" (cm) - es. 21 cm
+- Aggiunta opzione "Altro" per la vena con campo note
+
+#### Scheda Impianto PICC Completa - Semplificazione
+- **RIMOSSO**: Campo "Lotto"
+- **RIMOSSO**: Posizionamento CVC (succlavia dx/sx, giugulare dx/sx)
+- **RIMOSSO**: Label "PICC" nel posizionamento
+- **AGGIORNATO**: Posizionamento ora include solo:
+  - Braccio: dx / sn
+  - Vena: Basilica / Cefalica / Brachiale / Altro (con campo note)
+
 ### Sessione 08/01/2026 - Update 2
 
 #### Statistiche - Esclusione Pazienti Non Presentati
