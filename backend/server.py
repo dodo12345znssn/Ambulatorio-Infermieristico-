@@ -1247,19 +1247,23 @@ async def get_statistics(
     
     appointments = await db.appointments.find(query, {"_id": 0}).to_list(10000)
     
-    # Calculate statistics
-    total_accessi = len(appointments)
-    unique_patients = len(set(a["patient_id"] for a in appointments))
+    # IMPORTANTE: Escludere i pazienti "non_presentato" dalle statistiche
+    # Le prestazioni dei pazienti segnati in rosso (non presentati) non vengono contate
+    appointments_validi = [app for app in appointments if app.get("stato") != "non_presentato"]
     
-    # Prestazioni count
+    # Calculate statistics (solo appuntamenti effettuati o da_fare, escludendo non_presentato)
+    total_accessi = len(appointments_validi)
+    unique_patients = len(set(a["patient_id"] for a in appointments_validi))
+    
+    # Prestazioni count (solo per appuntamenti validi)
     prestazioni_count = {}
-    for app in appointments:
+    for app in appointments_validi:
         for prest in app.get("prestazioni", []):
             prestazioni_count[prest] = prestazioni_count.get(prest, 0) + 1
     
-    # Monthly breakdown
+    # Monthly breakdown (solo per appuntamenti validi)
     monthly_stats = {}
-    for app in appointments:
+    for app in appointments_validi:
         month = app["data"][:7]  # YYYY-MM
         if month not in monthly_stats:
             monthly_stats[month] = {"accessi": 0, "pazienti": set(), "prestazioni": {}}
