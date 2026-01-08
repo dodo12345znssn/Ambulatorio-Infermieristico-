@@ -261,6 +261,7 @@ const getEmptyFormData = () => ({
   posizionamento_cvc_altro: "",
   braccio: "",
   vena: "",
+  vena_altro: "",  // NUOVO: campo per vena "altro"
   exit_site_cm: "",
   diametro_vena_mm: "",
   profondita_cm: "",
