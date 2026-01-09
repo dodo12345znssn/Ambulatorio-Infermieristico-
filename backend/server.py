@@ -2296,11 +2296,31 @@ async def get_ai_response(message: str, session_id: str, ambulatorio: str, user_
         action = None
         response_text = response
         
-        # Check if response contains JSON action
-        json_match = re.search(r'\{[^{}]*"action"[^{}]*\}', response, re.DOTALL)
-        if json_match:
+        # Check if response contains JSON action - improved regex for nested objects
+        # First try to find JSON block with code fence
+        code_block_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response, re.DOTALL)
+        if code_block_match:
             try:
-                action = json.loads(json_match.group())
+                action = json.loads(code_block_match.group(1))
+                response_text = action.get("message", response)
+            except json.JSONDecodeError:
+                pass
+        
+        # If no code block, try to find raw JSON
+        if not action:
+            # Find JSON that starts with {"action" and contains nested params
+            json_match = re.search(r'(\{[^{}]*"action"[^{}]*"params"\s*:\s*\{[^{}]*\}[^{}]*\})', response, re.DOTALL)
+            if json_match:
+                try:
+                    action = json.loads(json_match.group(1))
+                    response_text = action.get("message", response)
+                except json.JSONDecodeError:
+                    pass
+        
+        # If the entire response is a JSON
+        if not action and response.strip().startswith('{'):
+            try:
+                action = json.loads(response.strip())
                 response_text = action.get("message", response)
             except json.JSONDecodeError:
                 pass
