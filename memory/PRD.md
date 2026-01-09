@@ -15,6 +15,26 @@ Applicazione web full-stack per la gestione di un ambulatorio infermieristico co
 
 ## Funzionalità Implementate
 
+### Sessione 09/01/2026 - Update 6
+
+#### Assistente IA Integrato
+- **Chat IA** accessibile da pulsante floating blu in basso a destra
+- **Funzionalità complete**:
+  - Creare pazienti: "Crea paziente PICC nome Mario cognome Rossi"
+  - Prendere appuntamenti: "Dai appuntamento a Mario Rossi per giovedì 22 alle 9:00"
+  - Consultare statistiche: "Quante medicazioni ho fatto nel 2026?"
+  - Compilare schede impianto: "Crea scheda impianto per Rossi con data 12/12/25 e tipo PICC"
+  - Aprire cartelle: "Apri cartella paziente Rossi"
+  - Cercare pazienti: "Cerca paziente Rossi"
+- **Comandi a step**: Possibilità di dare comandi incrementali
+- **Comandi complessi**: Un unico messaggio per azioni multiple
+- **Gestione orari**: Se orario occupato, propone primo disponibile
+- **Cronologia chat**: Possibilità di vedere chat precedenti e eliminarle
+- **Nuova chat**: Pulsante + per iniziare nuova conversazione
+- **Comando vocale**: Pulsante microfono per dettatura (Web Speech API)
+- **Sintesi vocale**: Pulsante "Ascolta" per ascoltare le risposte dell'IA
+- **Powered by**: OpenAI GPT-4o con Emergent LLM Key
+
 ### Sessione 08/01/2026 - Update 5
 
 #### Statistiche Annuali
