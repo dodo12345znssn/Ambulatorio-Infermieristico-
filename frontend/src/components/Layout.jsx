@@ -32,6 +32,7 @@ import {
   Type,
 } from "lucide-react";
 import { useState, useEffect } from "react";
+import AIAssistant from "@/components/AIAssistant";
 
 // Bottom navigation items (main navigation)
 const BOTTOM_NAV_ITEMS = [
