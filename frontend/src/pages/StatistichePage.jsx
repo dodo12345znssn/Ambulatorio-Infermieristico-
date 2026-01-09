@@ -189,6 +189,9 @@ export default function StatistichePage() {
 
   // Get period label for display
   const getPeriodLabel = (year, month) => {
+    if (month === null) {
+      return `Anno ${year}`;
+    }
     const monthName = MONTHS.find(m => m.value === month)?.label || "";
     return `${monthName} ${year}`;
   };
