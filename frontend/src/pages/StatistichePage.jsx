@@ -201,14 +201,16 @@ export default function StatistichePage() {
     try {
       if (activeTab === "IMPIANTI") {
         // Fetch implant statistics for primary period
-        const params = { ambulatorio, anno, mese };
+        const params = { ambulatorio, anno };
+        if (mese !== null) params.mese = mese;
         const response = await apiClient.get("/statistics/implants", { params });
         setImplantStats(response.data);
         setStats(null);
 
         // Fetch compare period if enabled
         if (compareMode) {
-          const compareParams = { ambulatorio, anno: compareAnno, mese: compareMese };
+          const compareParams = { ambulatorio, anno: compareAnno };
+          if (compareMese !== null) compareParams.mese = compareMese;
           const compareResponse = await apiClient.get("/statistics/implants", { params: compareParams });
           setCompareImplantStats(compareResponse.data);
         } else {
@@ -219,9 +221,9 @@ export default function StatistichePage() {
         const params = {
           ambulatorio,
           anno,
-          mese,
           tipo: isVillaGinestre ? "PICC" : activeTab,
         };
+        if (mese !== null) params.mese = mese;
 
         const response = await apiClient.get("/statistics", { params });
         setStats(response.data);
@@ -232,9 +234,9 @@ export default function StatistichePage() {
           const compareParams = {
             ambulatorio,
             anno: compareAnno,
-            mese: compareMese,
             tipo: isVillaGinestre ? "PICC" : activeTab,
           };
+          if (compareMese !== null) compareParams.mese = compareMese;
           const compareResponse = await apiClient.get("/statistics", { params: compareParams });
           setCompareStats(compareResponse.data);
         } else {
