@@ -257,16 +257,17 @@ export default function StatistichePage() {
 
   const generateExcel = () => {
     const tipo = isVillaGinestre ? "PICC" : activeTab;
-    const periodo = `${MONTHS[mese - 1]?.label}_${anno}`;
+    const periodo = mese !== null ? `${MONTHS.find(m => m.value === mese)?.label}_${anno}` : `Anno_${anno}`;
     const ambulatorioName = ambulatorio === "pta_centro" ? "PTA Centro" : "Villa delle Ginestre";
     
     let csvContent = "REPORT AMBULATORIO INFERMIERISTICO\n";
     csvContent += `Tipo: ${tipo}\n`;
-    csvContent += `Periodo: ${periodo}\n`;
+    csvContent += `Periodo: ${mese !== null ? MONTHS.find(m => m.value === mese)?.label + ' ' + anno : 'Anno ' + anno}\n`;
     csvContent += `Ambulatorio: ${ambulatorioName}\n`;
     
     if (compareMode) {
-      csvContent += `Confronto con: ${MONTHS[compareMese - 1]?.label} ${compareAnno}\n`;
+      const comparePeriodoLabel = compareMese !== null ? `${MONTHS.find(m => m.value === compareMese)?.label} ${compareAnno}` : `Anno ${compareAnno}`;
+      csvContent += `Confronto con: ${comparePeriodoLabel}\n`;
     }
     csvContent += "\n";
     
