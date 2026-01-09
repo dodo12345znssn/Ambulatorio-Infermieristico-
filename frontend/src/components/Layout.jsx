@@ -395,6 +395,9 @@ export const Layout = () => {
           );
         })}
       </nav>
+
+      {/* AI Assistant Chat */}
+      <AIAssistant />
     </div>
   );
 };
