@@ -335,9 +335,9 @@ export default function StatistichePage() {
 
   const generatePDF = () => {
     const tipo = isVillaGinestre ? "PICC" : activeTab;
-    const periodo = `${MONTHS[mese - 1]?.label} ${anno}`;
+    const periodo = mese !== null ? `${MONTHS.find(m => m.value === mese)?.label} ${anno}` : `Anno ${anno}`;
     const ambulatorioName = ambulatorio === "pta_centro" ? "PTA Centro" : "Villa delle Ginestre";
-    const confrontoPeriodo = compareMode ? `${MONTHS[compareMese - 1]?.label} ${compareAnno}` : null;
+    const confrontoPeriodo = compareMode ? (compareMese !== null ? `${MONTHS.find(m => m.value === compareMese)?.label} ${compareAnno}` : `Anno ${compareAnno}`) : null;
 
     const getDiffBadge = (current, compare) => {
       if (!compareMode || compare === null || compare === undefined) return '';
