@@ -15,6 +15,15 @@ Applicazione web full-stack per la gestione di un ambulatorio infermieristico co
 
 ## Funzionalità Implementate
 
+### Sessione 08/01/2026 - Update 5
+
+#### Statistiche Annuali
+- Aggiunta possibilità di visualizzare statistiche per **tutto l'anno**
+- Nel selettore del mese, la prima opzione è ora "Tutto l'anno"
+- Permette confronti annuali: es. **Anno 2025** vs **Anno 2026**
+- Funziona sia per statistiche MED/PICC che per Impianti
+- Export PDF e Excel aggiornati per supportare il periodo annuale
+
 ### Sessione 08/01/2026 - Update 4
 
 #### Stampa PDF Scheda Impianto Completa - Allineamento con Frontend
