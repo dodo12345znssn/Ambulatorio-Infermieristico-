@@ -2208,6 +2208,441 @@ async def delete_prescrizione(
         raise HTTPException(status_code=404, detail="Prescrizione non trovata")
     return {"message": "Prescrizione eliminata"}
 
+# ============== AI ASSISTANT ==============
+from emergentintegrations.llm.chat import LlmChat, UserMessage
+import json
+import re
+
+# AI Chat history storage in MongoDB
+class AIChatMessage(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    session_id: str
+    user_id: str
+    ambulatorio: str
+    role: str  # "user" or "assistant"
+    content: str
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class AIChatRequest(BaseModel):
+    message: str
+    session_id: Optional[str] = None
+    ambulatorio: Ambulatorio
+
+class AIChatResponse(BaseModel):
+    response: str
+    session_id: str
+    action_performed: Optional[dict] = None
+
+SYSTEM_PROMPT = """Sei un assistente IA dell'Ambulatorio Infermieristico. Puoi aiutare gli utenti a:
+
+1. **Creare pazienti**: Es. "Crea paziente PICC nome Mario cognome Rossi"
+2. **Prendere appuntamenti**: Es. "Dai appuntamento a Mario Rossi per giovedì 22 gennaio alle 9:00"
+3. **Consultare statistiche**: Es. "Quanti PICC ho impiantato a dicembre?" o "Quante medicazioni ho fatto nel 2025?"
+4. **Compilare schede**: Es. "Crea scheda impianto per Mario Rossi con data 12/12/2025 e tipo PICC"
+5. **Aprire cartelle**: Es. "Apri cartella paziente Rossi Mario"
+
+REGOLE IMPORTANTI:
+- Rispondi SEMPRE in italiano
+- Se un orario è occupato, proponi il primo orario disponibile
+- Se non capisci, chiedi chiarimenti
+- Puoi eseguire comandi a step o comandi complessi in un unico messaggio
+- Gli orari disponibili sono: 09:00, 09:30, 10:00, 10:30, 11:00, 11:30, 12:00, 12:30 (max 2 pazienti per slot)
+- I tipi paziente sono: PICC, MED, PICC_MED
+
+Quando devi eseguire un'azione, rispondi con un JSON nel formato:
+{"action": "nome_azione", "params": {...}, "message": "messaggio per utente"}
+
+Azioni disponibili:
+- create_patient: {"nome": "...", "cognome": "...", "tipo": "PICC/MED/PICC_MED"}
+- create_appointment: {"patient_name": "...", "data": "YYYY-MM-DD", "ora": "HH:MM", "tipo": "PICC/MED", "prestazioni": [...]}
+- get_statistics: {"tipo": "PICC/MED/IMPIANTI", "anno": 2025, "mese": null o 1-12}
+- open_patient: {"patient_name": "..."}
+- create_scheda_impianto: {"patient_name": "...", "tipo_catetere": "picc/midline/...", "data_impianto": "YYYY-MM-DD"}
+- search_patient: {"query": "..."}
+
+Se l'utente chiede qualcosa che non richiede un'azione specifica, rispondi normalmente senza JSON."""
+
+async def get_ai_response(message: str, session_id: str, ambulatorio: str, user_id: str) -> dict:
+    """Get AI response using emergentintegrations"""
+    try:
+        api_key = os.environ.get('EMERGENT_LLM_KEY')
+        if not api_key:
+            return {"response": "Errore: chiave API non configurata", "action": None}
+        
+        # Get chat history from database
+        history = await db.ai_chat_history.find({
+            "session_id": session_id
+        }).sort("timestamp", 1).to_list(50)
+        
+        # Build conversation context
+        context_messages = []
+        for msg in history[-10:]:  # Last 10 messages
+            context_messages.append(f"{msg['role'].upper()}: {msg['content']}")
+        
+        context = "\n".join(context_messages)
+        full_message = f"{context}\n\nUSER: {message}" if context else message
+        
+        # Initialize chat
+        chat = LlmChat(
+            api_key=api_key,
+            session_id=session_id,
+            system_message=SYSTEM_PROMPT
+        ).with_model("openai", "gpt-4o")
+        
+        user_msg = UserMessage(text=full_message)
+        response = await chat.send_message(user_msg)
+        
+        # Parse response for actions
+        action = None
+        response_text = response
+        
+        # Check if response contains JSON action
+        json_match = re.search(r'\{[^{}]*"action"[^{}]*\}', response, re.DOTALL)
+        if json_match:
+            try:
+                action = json.loads(json_match.group())
+                response_text = action.get("message", response)
+            except json.JSONDecodeError:
+                pass
+        
+        return {"response": response_text, "action": action}
+        
+    except Exception as e:
+        logger.error(f"AI Error: {str(e)}")
+        return {"response": f"Mi dispiace, ho avuto un problema: {str(e)}", "action": None}
+
+async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dict:
+    """Execute an action determined by AI"""
+    action_type = action.get("action")
+    params = action.get("params", {})
+    
+    try:
+        if action_type == "create_patient":
+            # Create patient
+            patient_data = {
+                "id": str(uuid.uuid4()),
+                "nome": params.get("nome", ""),
+                "cognome": params.get("cognome", ""),
+                "tipo": params.get("tipo", "PICC"),
+                "ambulatorio": ambulatorio,
+                "status": "in_cura",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            await db.patients.insert_one(patient_data)
+            return {"success": True, "patient_id": patient_data["id"], "message": f"Paziente {params.get('cognome')} {params.get('nome')} creato con successo!"}
+        
+        elif action_type == "search_patient":
+            query = params.get("query", "").lower()
+            patients = await db.patients.find({
+                "ambulatorio": ambulatorio,
+                "$or": [
+                    {"nome": {"$regex": query, "$options": "i"}},
+                    {"cognome": {"$regex": query, "$options": "i"}}
+                ]
+            }, {"_id": 0}).to_list(10)
+            return {"success": True, "patients": patients}
+        
+        elif action_type == "create_appointment":
+            # Find patient
+            patient_name = params.get("patient_name", "").lower()
+            parts = patient_name.split()
+            patient = await db.patients.find_one({
+                "ambulatorio": ambulatorio,
+                "$or": [
+                    {"cognome": {"$regex": parts[0] if parts else "", "$options": "i"}},
+                    {"nome": {"$regex": parts[-1] if parts else "", "$options": "i"}}
+                ]
+            })
+            
+            if not patient:
+                return {"success": False, "message": f"Paziente '{patient_name}' non trovato. Vuoi crearlo?"}
+            
+            data = params.get("data")
+            ora = params.get("ora")
+            tipo = params.get("tipo", patient.get("tipo", "PICC"))
+            
+            # Check slot availability
+            existing = await db.appointments.count_documents({
+                "ambulatorio": ambulatorio,
+                "data": data,
+                "ora": ora,
+                "tipo": tipo
+            })
+            
+            if existing >= 2:
+                # Find next available slot
+                slots = ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30"]
+                for slot in slots:
+                    count = await db.appointments.count_documents({
+                        "ambulatorio": ambulatorio,
+                        "data": data,
+                        "ora": slot,
+                        "tipo": tipo
+                    })
+                    if count < 2:
+                        return {"success": False, "message": f"Orario {ora} non disponibile. Primo orario disponibile: {slot}. Confermare?", "suggested_time": slot}
+                return {"success": False, "message": f"Nessun orario disponibile per il {data}"}
+            
+            # Create appointment
+            prestazioni = params.get("prestazioni", [])
+            if not prestazioni and tipo in ["PICC", "PICC_MED"]:
+                prestazioni = ["medicazione_semplice", "irrigazione_catetere"]
+            
+            appointment = {
+                "id": str(uuid.uuid4()),
+                "patient_id": patient["id"],
+                "ambulatorio": ambulatorio,
+                "data": data,
+                "ora": ora,
+                "tipo": tipo,
+                "prestazioni": prestazioni,
+                "stato": "da_fare",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            await db.appointments.insert_one(appointment)
+            return {"success": True, "message": f"Appuntamento creato per {patient['cognome']} {patient['nome']} il {data} alle {ora}"}
+        
+        elif action_type == "get_statistics":
+            tipo = params.get("tipo")
+            anno = params.get("anno", datetime.now().year)
+            mese = params.get("mese")
+            
+            # Build date range
+            if mese:
+                start_date = f"{anno}-{mese:02d}-01"
+                end_date = f"{anno}-{mese + 1:02d}-01" if mese < 12 else f"{anno + 1}-01-01"
+            else:
+                start_date = f"{anno}-01-01"
+                end_date = f"{anno + 1}-01-01"
+            
+            if tipo == "IMPIANTI":
+                schede = await db.schede_impianto_picc.find({
+                    "ambulatorio": ambulatorio,
+                    "data_impianto": {"$gte": start_date, "$lt": end_date}
+                }).to_list(10000)
+                return {"success": True, "totale_impianti": len(schede), "periodo": f"{mese}/{anno}" if mese else f"Anno {anno}"}
+            else:
+                query = {
+                    "ambulatorio": ambulatorio,
+                    "data": {"$gte": start_date, "$lt": end_date},
+                    "stato": {"$ne": "non_presentato"}
+                }
+                if tipo:
+                    query["tipo"] = tipo
+                
+                appointments = await db.appointments.find(query).to_list(10000)
+                
+                prestazioni_count = {}
+                for app in appointments:
+                    for prest in app.get("prestazioni", []):
+                        prestazioni_count[prest] = prestazioni_count.get(prest, 0) + 1
+                
+                periodo = f"{mese}/{anno}" if mese else f"Anno {anno}"
+                return {
+                    "success": True,
+                    "totale_accessi": len(appointments),
+                    "pazienti_unici": len(set(a["patient_id"] for a in appointments)),
+                    "prestazioni": prestazioni_count,
+                    "periodo": periodo
+                }
+        
+        elif action_type == "open_patient":
+            patient_name = params.get("patient_name", "").lower()
+            parts = patient_name.split()
+            patient = await db.patients.find_one({
+                "ambulatorio": ambulatorio,
+                "$or": [
+                    {"cognome": {"$regex": parts[0] if parts else "", "$options": "i"}},
+                    {"nome": {"$regex": parts[-1] if parts else "", "$options": "i"}}
+                ]
+            }, {"_id": 0})
+            
+            if patient:
+                return {"success": True, "patient": patient, "navigate_to": f"/pazienti/{patient['id']}"}
+            return {"success": False, "message": f"Paziente '{patient_name}' non trovato"}
+        
+        elif action_type == "create_scheda_impianto":
+            patient_name = params.get("patient_name", "").lower()
+            parts = patient_name.split()
+            patient = await db.patients.find_one({
+                "ambulatorio": ambulatorio,
+                "$or": [
+                    {"cognome": {"$regex": parts[0] if parts else "", "$options": "i"}},
+                    {"nome": {"$regex": parts[-1] if parts else "", "$options": "i"}}
+                ]
+            })
+            
+            if not patient:
+                return {"success": False, "message": f"Paziente '{patient_name}' non trovato"}
+            
+            scheda = {
+                "id": str(uuid.uuid4()),
+                "patient_id": patient["id"],
+                "ambulatorio": ambulatorio,
+                "scheda_type": "semplificata",
+                "tipo_catetere": params.get("tipo_catetere", "picc"),
+                "data_impianto": params.get("data_impianto", datetime.now().strftime("%Y-%m-%d")),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            await db.schede_impianto_picc.insert_one(scheda)
+            return {"success": True, "message": f"Scheda impianto creata per {patient['cognome']} {patient['nome']}"}
+        
+        return {"success": False, "message": "Azione non riconosciuta"}
+        
+    except Exception as e:
+        logger.error(f"Action error: {str(e)}")
+        return {"success": False, "message": f"Errore nell'esecuzione: {str(e)}"}
+
+@api_router.post("/ai/chat")
+async def ai_chat(
+    request: AIChatRequest,
+    payload: dict = Depends(verify_token)
+):
+    """Chat with AI assistant"""
+    if request.ambulatorio.value not in payload["ambulatori"]:
+        raise HTTPException(status_code=403, detail="Non hai accesso a questo ambulatorio")
+    
+    user_id = payload.get("sub", "unknown")
+    session_id = request.session_id or str(uuid.uuid4())
+    
+    # Save user message
+    user_msg = {
+        "id": str(uuid.uuid4()),
+        "session_id": session_id,
+        "user_id": user_id,
+        "ambulatorio": request.ambulatorio.value,
+        "role": "user",
+        "content": request.message,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    await db.ai_chat_history.insert_one(user_msg)
+    
+    # Get AI response
+    ai_result = await get_ai_response(request.message, session_id, request.ambulatorio.value, user_id)
+    
+    # Execute action if present
+    action_result = None
+    if ai_result.get("action"):
+        action_result = await execute_ai_action(ai_result["action"], request.ambulatorio.value, user_id)
+        # Update response with action result
+        if action_result.get("success"):
+            ai_result["response"] = action_result.get("message", ai_result["response"])
+        elif action_result.get("message"):
+            ai_result["response"] = action_result["message"]
+    
+    # Save assistant message
+    assistant_msg = {
+        "id": str(uuid.uuid4()),
+        "session_id": session_id,
+        "user_id": user_id,
+        "ambulatorio": request.ambulatorio.value,
+        "role": "assistant",
+        "content": ai_result["response"],
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    await db.ai_chat_history.insert_one(assistant_msg)
+    
+    return {
+        "response": ai_result["response"],
+        "session_id": session_id,
+        "action_performed": action_result
+    }
+
+@api_router.get("/ai/history")
+async def get_ai_history(
+    ambulatorio: Ambulatorio,
+    session_id: Optional[str] = None,
+    payload: dict = Depends(verify_token)
+):
+    """Get chat history"""
+    if ambulatorio.value not in payload["ambulatori"]:
+        raise HTTPException(status_code=403, detail="Non hai accesso a questo ambulatorio")
+    
+    user_id = payload.get("sub", "unknown")
+    
+    query = {"user_id": user_id, "ambulatorio": ambulatorio.value}
+    if session_id:
+        query["session_id"] = session_id
+    
+    messages = await db.ai_chat_history.find(query, {"_id": 0}).sort("timestamp", -1).to_list(100)
+    
+    # Group by session
+    sessions = {}
+    for msg in messages:
+        sid = msg["session_id"]
+        if sid not in sessions:
+            sessions[sid] = {"session_id": sid, "messages": [], "last_message": msg["timestamp"]}
+        sessions[sid]["messages"].append(msg)
+    
+    return list(sessions.values())
+
+@api_router.get("/ai/sessions")
+async def get_ai_sessions(
+    ambulatorio: Ambulatorio,
+    payload: dict = Depends(verify_token)
+):
+    """Get all chat sessions"""
+    if ambulatorio.value not in payload["ambulatori"]:
+        raise HTTPException(status_code=403, detail="Non hai accesso a questo ambulatorio")
+    
+    user_id = payload.get("sub", "unknown")
+    
+    pipeline = [
+        {"$match": {"user_id": user_id, "ambulatorio": ambulatorio.value}},
+        {"$sort": {"timestamp": -1}},
+        {"$group": {
+            "_id": "$session_id",
+            "last_message": {"$first": "$content"},
+            "last_timestamp": {"$first": "$timestamp"},
+            "message_count": {"$sum": 1}
+        }},
+        {"$sort": {"last_timestamp": -1}},
+        {"$limit": 20}
+    ]
+    
+    sessions = await db.ai_chat_history.aggregate(pipeline).to_list(20)
+    return [{"session_id": s["_id"], "last_message": s["last_message"][:50] + "..." if len(s["last_message"]) > 50 else s["last_message"], "last_timestamp": s["last_timestamp"], "message_count": s["message_count"]} for s in sessions]
+
+@api_router.delete("/ai/session/{session_id}")
+async def delete_ai_session(
+    session_id: str,
+    ambulatorio: Ambulatorio,
+    payload: dict = Depends(verify_token)
+):
+    """Delete a chat session"""
+    if ambulatorio.value not in payload["ambulatori"]:
+        raise HTTPException(status_code=403, detail="Non hai accesso a questo ambulatorio")
+    
+    user_id = payload.get("sub", "unknown")
+    
+    result = await db.ai_chat_history.delete_many({
+        "session_id": session_id,
+        "user_id": user_id,
+        "ambulatorio": ambulatorio.value
+    })
+    
+    return {"deleted": result.deleted_count}
+
+@api_router.delete("/ai/history")
+async def clear_ai_history(
+    ambulatorio: Ambulatorio,
+    payload: dict = Depends(verify_token)
+):
+    """Clear all chat history"""
+    if ambulatorio.value not in payload["ambulatori"]:
+        raise HTTPException(status_code=403, detail="Non hai accesso a questo ambulatorio")
+    
+    user_id = payload.get("sub", "unknown")
+    
+    result = await db.ai_chat_history.delete_many({
+        "user_id": user_id,
+        "ambulatorio": ambulatorio.value
+    })
+    
+    return {"deleted": result.deleted_count}
+
 # Include the router in the main app
 app.include_router(api_router)
 
