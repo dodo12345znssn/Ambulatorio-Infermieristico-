@@ -25,6 +25,7 @@ import {
 import { toast } from "sonner";
 
 const MONTHS = [
+  { value: null, label: "Tutto l'anno" },
   { value: 1, label: "Gennaio" },
   { value: 2, label: "Febbraio" },
   { value: 3, label: "Marzo" },
