@@ -174,12 +174,12 @@ export default function StatistichePage() {
 
   // Primary period filters
   const [anno, setAnno] = useState(new Date().getFullYear());
-  const [mese, setMese] = useState(new Date().getMonth() + 1);
+  const [mese, setMese] = useState(null); // null = tutto l'anno
 
   // Compare mode
   const [compareMode, setCompareMode] = useState(false);
-  const [compareAnno, setCompareAnno] = useState(new Date().getFullYear());
-  const [compareMese, setCompareMese] = useState(new Date().getMonth()); // Previous month
+  const [compareAnno, setCompareAnno] = useState(new Date().getFullYear() - 1); // Anno precedente per confronto
+  const [compareMese, setCompareMese] = useState(null); // null = tutto l'anno
 
   const isVillaGinestre = ambulatorio === "villa_ginestre";
 
