@@ -147,7 +147,9 @@ export default function DashboardPage() {
           {!isVillaGinestre && (
             <Card className="border-purple-200 bg-purple-50/50">
               <CardContent className="pt-4 pb-3 px-4">
-                <div className="text-3xl font-bold text-purple-600">{stats.totalePICCMED}</div>
+                <div className="text-3xl font-bold text-purple-600">
+                  {loading ? <span className="animate-pulse">—</span> : stats.totalePICCMED}
+                </div>
                 <p className="text-sm text-purple-600/80 font-medium">PICC + MED</p>
               </CardContent>
             </Card>
