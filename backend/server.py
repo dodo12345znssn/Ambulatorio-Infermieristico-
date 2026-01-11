@@ -3531,10 +3531,15 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
                 {"scheda_id": last_scheda["id"], "day_key": nuova_data}
             )
             
+            # Includi info paziente per memoria contestuale frontend
+            patient_info = {"id": patient["id"], "cognome": patient.get("cognome", ""), "nome": patient.get("nome", ""), "tipo": patient.get("tipo", "")}
+            
             return {"success": True,
                     "message": f"✅ Medicazione PICC copiata!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📅 Nuova data: {nuova_data}\n\nHo copiato i dati dalla medicazione precedente ({last_day_key}).\n\n💡 Puoi annullare dicendo 'annulla'",
                     "navigate_to": f"/pazienti/{patient['id']}",
-                    "can_undo": True}
+                    "can_undo": True,
+                    "patient": patient_info,
+                    "action_type": "copy_scheda_gestione_picc"}
         
         # ==================== OPEN PATIENT ====================
         elif action_type == "open_patient":
