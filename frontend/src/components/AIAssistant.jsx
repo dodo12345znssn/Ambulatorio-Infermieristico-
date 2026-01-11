@@ -609,6 +609,13 @@ export default function AIAssistant() {
 
     const userMessage = inputValue.trim();
     setInputValue("");
+    
+    // Gestisci workflow attivo
+    if (activeWorkflow) {
+      const handled = handleWorkflowInput(userMessage);
+      if (handled) return;
+    }
+    
     setMessages(prev => [...prev, { role: "user", content: userMessage }]);
     
     // Check if user is confirming extracted patients
@@ -643,16 +650,37 @@ export default function AIAssistant() {
     setIsLoading(true);
 
     try {
+      // Aggiungi contesto paziente se presente
+      let messageWithContext = userMessage;
+      if (contextMemory.lastPatient && !userMessage.toLowerCase().includes(contextMemory.lastPatient.cognome.toLowerCase())) {
+        // Se l'utente usa pronomi o riferimenti, aggiungi contesto
+        const pronouns = ["lui", "lei", "questo", "questa", "stesso", "stessa", "paziente"];
+        if (pronouns.some(p => lowerMsg.includes(p))) {
+          messageWithContext = `[Contesto: ultimo paziente discusso = ${contextMemory.lastPatient.cognome} ${contextMemory.lastPatient.nome}] ${userMessage}`;
+        }
+      }
+      
       const response = await apiClient.post("/ai/chat", {
-        message: userMessage,
+        message: messageWithContext,
         session_id: sessionId,
-        ambulatorio
+        ambulatorio,
+        context_memory: contextMemory
       });
 
       const { response: aiResponse, session_id: newSessionId, action_performed } = response.data;
       
       if (!sessionId) {
         setSessionId(newSessionId);
+      }
+
+      // Aggiorna memoria contestuale se l'azione coinvolge un paziente
+      if (action_performed?.patient) {
+        setContextMemory(prev => ({
+          ...prev,
+          lastPatient: action_performed.patient,
+          lastAction: action_performed.action_type
+        }));
+        setShowSuggestions(true);
       }
 
       // Check for PDF download offer
@@ -687,7 +715,12 @@ export default function AIAssistant() {
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+      if (activeWorkflow) {
+        handleWorkflowInput(inputValue.trim());
+        setInputValue("");
+      } else {
+        sendMessage();
+      }
     }
   };
 
