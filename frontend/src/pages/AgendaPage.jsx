@@ -167,7 +167,14 @@ export default function AgendaPage() {
         setInitialLoadDone(true);
       }
     } catch (error) {
-      toast.error("Errore nel caricamento dei dati");
+      console.error("Error fetching agenda data:", error);
+      // Only show error for network issues, not for empty data
+      if (error.response?.status === 401) {
+        // Token expired - will be handled by interceptor
+      } else if (error.code === 'ERR_NETWORK') {
+        toast.error("Errore di connessione al server");
+      }
+      // Silently handle other errors - data will just be empty
     } finally {
       setLoading(false);
     }
