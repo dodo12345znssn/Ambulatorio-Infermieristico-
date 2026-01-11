@@ -3268,9 +3268,14 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
                 {"appointment_id": appointment["id"]}
             )
             
+            # Includi info paziente per memoria contestuale frontend
+            patient_info = {"id": patient["id"], "cognome": patient.get("cognome", ""), "nome": patient.get("nome", ""), "tipo": patient.get("tipo", "")}
+            
             return {"success": True, 
                     "message": f"✅ Appuntamento creato!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📅 {data} alle **{ora}**\n🏷️ Tipo: {tipo}\n\n💡 Puoi annullare dicendo 'annulla'",
-                    "can_undo": True}
+                    "can_undo": True,
+                    "patient": patient_info,
+                    "action_type": "create_appointment"}
         
         # ==================== DELETE APPOINTMENT ====================
         elif action_type == "delete_appointment":
