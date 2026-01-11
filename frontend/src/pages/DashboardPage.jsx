@@ -164,7 +164,9 @@ export default function DashboardPage() {
           </Card>
           <Card className="border-orange-200 bg-orange-50/50">
             <CardContent className="pt-4 pb-3 px-4">
-              <div className="text-3xl font-bold text-orange-600">{stats.totaleSospesi}</div>
+              <div className="text-3xl font-bold text-orange-600">
+                {loading ? <span className="animate-pulse">—</span> : stats.totaleSospesi}
+              </div>
               <p className="text-sm text-orange-600/80 font-medium">Sospesi</p>
             </CardContent>
           </Card>
