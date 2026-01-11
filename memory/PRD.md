@@ -66,19 +66,28 @@ The user wants to enhance a nursing ambulatory management application with featu
 - ✅ Removed "N/A" display for missing codice_fiscale in Prescrizioni
 - ✅ Added 30s timeout to API client to prevent app freezing
 
+## AI Improvements (January 11, 2026)
+- ✅ **Smart Suggestions**: Quick action buttons (Nuovo paziente, Appuntamento, etc.)
+- ✅ **Guided Workflows**: Step-by-step guides for common operations
+- ✅ **Contextual Memory**: Remembers last discussed patient
+- ✅ **Improved Name Recognition**: Precise patient matching (cognome exact → cognome+nome → partial)
+- ✅ **Copy Schede**: Can copy last PICC/MED medicazione with new date
+
 ## Prioritized Backlog
 
 ### P0 (Critical)
-- [ ] Data restoration after deployment (81 patients lost)
-- [ ] Create backup/export functionality
+- [x] Fix patient name recognition in AI
+- [x] Add smart suggestions to AI
 
 ### P1 (High)
 - [ ] Complete AI "Undo" feature implementation
 - [ ] Improve AI appointment time suggestions
+- [ ] Alert for expiring prescriptions
 
 ### P2 (Medium)
 - [ ] Voice input/output for AI assistant
 - [ ] Refactor server.py into modules
+- [ ] Automatic weekly reports
 
 ### P3 (Low/Future)
 - [ ] Automated data migration for deployments
@@ -92,12 +101,13 @@ The user wants to enhance a nursing ambulatory management application with featu
 - `GET /api/statistics` - Performance statistics
 - `POST /api/ai/chat` - AI assistant interaction
 - `GET /api/export/patient/{id}` - PDF generation
+- `GET /health` - Kubernetes health check
 
 ## Credentials
 - Username: `Domenico`
 - Password: `infermiere`
 
 ## Known Issues
-- Database separation between preview and deploy environments
 - Server.py needs modularization (>4000 lines)
 - AI appointment logic sometimes suboptimal
+- Undo feature partially implemented
