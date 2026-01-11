@@ -74,6 +74,11 @@
     color: hsl(340 82% 52%);
 }
 
+.dashboard-card-icon.impianti {
+    background: hsl(200 85% 45% / 0.1);
+    color: hsl(200 85% 45%);
+}
+
 /* Mobile bottom navigation safe area */
 .safe-area-bottom {
     padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
