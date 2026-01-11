@@ -133,8 +133,17 @@ export default function PatientDetailPage() {
       const response = await apiClient.get(`/patients/${patientId}`);
       setPatient(response.data);
     } catch (error) {
-      toast.error("Errore nel caricamento del paziente");
-      navigate("/pazienti");
+      console.error("Error fetching patient:", error);
+      if (error.response?.status === 404) {
+        toast.error("Paziente non trovato");
+        navigate("/pazienti");
+      } else if (error.code === 'ERR_NETWORK') {
+        toast.error("Errore di connessione al server");
+      }
+      // For other errors, redirect to patients list
+      if (error.response?.status !== 401) {
+        navigate("/pazienti");
+      }
     } finally {
       setLoading(false);
     }
