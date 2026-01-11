@@ -61,6 +61,9 @@ const getStatoColorClass = (stato) => {
 const PRESTAZIONI_PICC = [
   { id: "medicazione_semplice", label: "Medicazione semplice", icon: Bandage },
   { id: "irrigazione_catetere", label: "Irrigazione catetere", icon: Droplets },
+  { id: "espianto_picc", label: "Espianto PICC", icon: CircleDot, isEspianto: true },
+  { id: "espianto_picc_port", label: "Espianto PICC Port", icon: CircleDot, isEspianto: true },
+  { id: "espianto_midline", label: "Espianto Midline", icon: CircleDot, isEspianto: true },
 ];
 
 const PRESTAZIONI_MED = [

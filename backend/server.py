@@ -616,6 +616,137 @@ async def delete_patient(patient_id: str, payload: dict = Depends(verify_token))
     
     return {"message": "Paziente e tutte le schede correlate eliminati"}
 
+# ============== BATCH PATIENT OPERATIONS ==============
+class BatchPatientCreate(BaseModel):
+    patients: List[PatientCreate]
+
+class BatchStatusChange(BaseModel):
+    patient_ids: List[str]
+    status: PatientStatus
+    discharge_reason: Optional[str] = None
+    discharge_notes: Optional[str] = None
+    suspend_notes: Optional[str] = None
+
+class BatchDelete(BaseModel):
+    patient_ids: List[str]
+
+@api_router.post("/patients/batch", status_code=201)
+async def create_patients_batch(data: BatchPatientCreate, payload: dict = Depends(verify_token)):
+    """Create multiple patients at once"""
+    created = []
+    errors = []
+    
+    for patient_data in data.patients:
+        try:
+            if patient_data.ambulatorio.value not in payload["ambulatori"]:
+                errors.append({"patient": f"{patient_data.cognome} {patient_data.nome}", "error": "Non hai accesso a questo ambulatorio"})
+                continue
+            
+            # Villa Ginestre only allows PICC
+            if patient_data.ambulatorio == Ambulatorio.VILLA_GINESTRE and patient_data.tipo != PatientType.PICC:
+                errors.append({"patient": f"{patient_data.cognome} {patient_data.nome}", "error": "Villa delle Ginestre gestisce solo pazienti PICC"})
+                continue
+            
+            # Generate unique patient code
+            codice_paziente = generate_patient_code(patient_data.nome, patient_data.cognome)
+            while await db.patients.find_one({"codice_paziente": codice_paziente}):
+                codice_paziente = generate_patient_code(patient_data.nome, patient_data.cognome)
+            
+            patient_dict = patient_data.model_dump()
+            patient_dict["codice_paziente"] = codice_paziente
+            patient_dict["scheda_med_counter"] = 0
+            patient = Patient(**patient_dict)
+            doc = patient.model_dump()
+            await db.patients.insert_one(doc)
+            created.append(patient)
+        except Exception as e:
+            errors.append({"patient": f"{patient_data.cognome} {patient_data.nome}", "error": str(e)})
+    
+    return {
+        "created": len(created),
+        "errors": len(errors),
+        "patients": [p.model_dump() for p in created],
+        "error_details": errors
+    }
+
+@api_router.put("/patients/batch/status")
+async def update_patients_status_batch(data: BatchStatusChange, payload: dict = Depends(verify_token)):
+    """Change status of multiple patients at once"""
+    updated = []
+    errors = []
+    
+    for patient_id in data.patient_ids:
+        try:
+            patient = await db.patients.find_one({"id": patient_id}, {"_id": 0})
+            if not patient:
+                errors.append({"patient_id": patient_id, "error": "Paziente non trovato"})
+                continue
+            
+            if patient["ambulatorio"] not in payload["ambulatori"]:
+                errors.append({"patient_id": patient_id, "error": "Non hai accesso a questo ambulatorio"})
+                continue
+            
+            update_data = {
+                "status": data.status.value,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            if data.status == PatientStatus.DIMESSO:
+                update_data["discharge_reason"] = data.discharge_reason
+                update_data["discharge_notes"] = data.discharge_notes
+                update_data["data_dimissione"] = datetime.now().strftime("%Y-%m-%d")
+            elif data.status == PatientStatus.SOSPESO:
+                update_data["suspend_notes"] = data.suspend_notes
+            
+            await db.patients.update_one({"id": patient_id}, {"$set": update_data})
+            updated.append({"id": patient_id, "nome": f"{patient['cognome']} {patient['nome']}"})
+        except Exception as e:
+            errors.append({"patient_id": patient_id, "error": str(e)})
+    
+    return {
+        "updated": len(updated),
+        "errors": len(errors),
+        "patients": updated,
+        "error_details": errors
+    }
+
+@api_router.post("/patients/batch/delete")
+async def delete_patients_batch(data: BatchDelete, payload: dict = Depends(verify_token)):
+    """Delete multiple patients at once"""
+    deleted = []
+    errors = []
+    
+    for patient_id in data.patient_ids:
+        try:
+            patient = await db.patients.find_one({"id": patient_id}, {"_id": 0})
+            if not patient:
+                errors.append({"patient_id": patient_id, "error": "Paziente non trovato"})
+                continue
+            
+            if patient["ambulatorio"] not in payload["ambulatori"]:
+                errors.append({"patient_id": patient_id, "error": "Non hai accesso a questo ambulatorio"})
+                continue
+            
+            # Delete patient and all related records
+            await db.patients.delete_one({"id": patient_id})
+            await db.schede_impianto_picc.delete_many({"patient_id": patient_id})
+            await db.schede_gestione_picc.delete_many({"patient_id": patient_id})
+            await db.schede_medicazione_med.delete_many({"patient_id": patient_id})
+            await db.appointments.delete_many({"patient_id": patient_id})
+            await db.prescrizioni.delete_many({"patient_id": patient_id})
+            await db.photos.delete_many({"patient_id": patient_id})
+            
+            deleted.append({"id": patient_id, "nome": f"{patient['cognome']} {patient['nome']}"})
+        except Exception as e:
+            errors.append({"patient_id": patient_id, "error": str(e)})
+    
+    return {
+        "deleted": len(deleted),
+        "errors": len(errors),
+        "patients": deleted,
+        "error_details": errors
+    }
+
 # ============== APPOINTMENTS ROUTES ==============
 @api_router.post("/appointments", response_model=Appointment)
 async def create_appointment(data: AppointmentCreate, payload: dict = Depends(verify_token)):
@@ -813,6 +944,183 @@ async def update_scheda_impianto_picc(scheda_id: str, data: dict, payload: dict 
     await db.schede_impianto_picc.update_one({"id": scheda_id}, {"$set": data})
     updated = await db.schede_impianto_picc.find_one({"id": scheda_id}, {"_id": 0})
     return updated
+
+# ============== IMPIANTI LIST ENDPOINT ==============
+@api_router.get("/impianti")
+async def get_impianti_list(
+    ambulatorio: str,
+    anno: int = None,
+    mese: int = None,
+    tipo_impianto: str = None,
+    payload: dict = Depends(verify_token)
+):
+    """Get all implants with patient info, filterable by date and type"""
+    if ambulatorio not in payload["ambulatori"]:
+        raise HTTPException(status_code=403, detail="Non hai accesso a questo ambulatorio")
+    
+    # Build query for schede_impianto_picc
+    query = {"ambulatorio": ambulatorio}
+    
+    # Filter by tipo_catetere if specified
+    if tipo_impianto and tipo_impianto != "tutti":
+        query["tipo_catetere"] = tipo_impianto
+    
+    # Get all schede that match the query
+    schede = await db.schede_impianto_picc.find(query, {"_id": 0}).to_list(10000)
+    
+    # Build result with patient info
+    result = []
+    for scheda in schede:
+        # Get the implant date
+        data_impianto = scheda.get("data_posizionamento") or scheda.get("data_impianto")
+        if not data_impianto:
+            continue
+            
+        # Parse date for filtering
+        try:
+            # Handle different date formats
+            if "/" in data_impianto:
+                parts = data_impianto.split("/")
+                if len(parts) == 3:
+                    if len(parts[2]) == 2:
+                        parts[2] = "20" + parts[2]
+                    parsed_date = f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+            else:
+                parsed_date = data_impianto
+                
+            date_obj = datetime.strptime(parsed_date, "%Y-%m-%d")
+            
+            # Filter by anno
+            if anno and date_obj.year != anno:
+                continue
+            # Filter by mese
+            if mese and date_obj.month != mese:
+                continue
+                
+        except (ValueError, IndexError):
+            # Skip entries with invalid dates if filtering is active
+            if anno or mese:
+                continue
+        
+        # Get patient info
+        patient = await db.patients.find_one({"id": scheda["patient_id"]}, {"_id": 0})
+        if not patient:
+            continue
+        
+        result.append({
+            "scheda_id": scheda["id"],
+            "patient_id": scheda["patient_id"],
+            "patient_nome": patient.get("nome", ""),
+            "patient_cognome": patient.get("cognome", ""),
+            "data_impianto": data_impianto,
+            "data_impianto_parsed": parsed_date if 'parsed_date' in dir() else data_impianto,
+            "tipo_impianto": scheda.get("tipo_catetere", "N/D"),
+            "ambulatorio": ambulatorio
+        })
+    
+    # Sort by date (most recent first within each month)
+    def parse_date_for_sort(item):
+        try:
+            d = item.get("data_impianto_parsed") or item.get("data_impianto")
+            if "/" in d:
+                parts = d.split("/")
+                if len(parts) == 3:
+                    if len(parts[2]) == 2:
+                        parts[2] = "20" + parts[2]
+                    return f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+            return d
+        except:
+            return "0000-00-00"
+    
+    result.sort(key=lambda x: parse_date_for_sort(x), reverse=False)
+    
+    return {
+        "impianti": result,
+        "count": len(result),
+        "filters": {
+            "anno": anno,
+            "mese": mese,
+            "tipo_impianto": tipo_impianto
+        }
+    }
+
+# ============== ESPIANTI LIST ENDPOINT ==============
+@api_router.get("/espianti")
+async def get_espianti_list(
+    ambulatorio: str,
+    anno: int = None,
+    mese: int = None,
+    payload: dict = Depends(verify_token)
+):
+    """Get all espianti (from appointments with espianto prestazioni)"""
+    if ambulatorio not in payload["ambulatori"]:
+        raise HTTPException(status_code=403, detail="Non hai accesso a questo ambulatorio")
+    
+    # Build date range
+    if anno:
+        if mese:
+            start_date = f"{anno}-{mese:02d}-01"
+            if mese == 12:
+                end_date = f"{anno + 1}-01-01"
+            else:
+                end_date = f"{anno}-{mese + 1:02d}-01"
+        else:
+            start_date = f"{anno}-01-01"
+            end_date = f"{anno + 1}-01-01"
+    else:
+        start_date = "2020-01-01"
+        end_date = "2030-12-31"
+    
+    # Query appointments with espianto prestazioni
+    espianto_types = ["espianto_picc", "espianto_picc_port", "espianto_midline"]
+    
+    query = {
+        "ambulatorio": ambulatorio,
+        "data": {"$gte": start_date, "$lt": end_date},
+        "prestazioni": {"$in": espianto_types}
+    }
+    
+    appointments = await db.appointments.find(query, {"_id": 0}).to_list(10000)
+    
+    # Build result
+    result = []
+    for apt in appointments:
+        prestazioni = apt.get("prestazioni", [])
+        
+        # Find which espianto type
+        espianto_tipo = None
+        for et in espianto_types:
+            if et in prestazioni:
+                espianto_tipo = et
+                break
+        
+        if not espianto_tipo:
+            continue
+        
+        # Get patient info
+        patient = await db.patients.find_one({"id": apt.get("patient_id")}, {"_id": 0})
+        
+        result.append({
+            "appointment_id": apt.get("id"),
+            "patient_id": apt.get("patient_id"),
+            "patient_nome": patient.get("nome", "") if patient else apt.get("patient_nome", ""),
+            "patient_cognome": patient.get("cognome", "") if patient else apt.get("patient_cognome", ""),
+            "data_espianto": apt.get("data"),
+            "tipo_espianto": espianto_tipo,
+            "ambulatorio": ambulatorio
+        })
+    
+    # Sort by date
+    result.sort(key=lambda x: x.get("data_espianto", ""), reverse=False)
+    
+    return {
+        "espianti": result,
+        "count": len(result),
+        "filters": {
+            "anno": anno,
+            "mese": mese
+        }
+    }
 
 # Generate PDF for Scheda Impianto PICC in official format
 @api_router.get("/schede-impianto-picc/{scheda_id}/pdf")
@@ -1479,6 +1787,77 @@ async def get_implant_statistics(
     
     return {
         "totale_impianti": len(schede),
+        "per_tipo": tipo_counts,
+        "tipo_labels": tipo_labels,
+        "dettaglio_mensile": monthly_breakdown
+    }
+
+@api_router.get("/statistics/espianti")
+async def get_espianti_statistics(
+    ambulatorio: Ambulatorio,
+    anno: int,
+    mese: Optional[int] = None,
+    payload: dict = Depends(verify_token)
+):
+    """Get statistics for espianti (from appointments with espianto prestazioni)"""
+    if ambulatorio.value not in payload["ambulatori"]:
+        raise HTTPException(status_code=403, detail="Non hai accesso a questo ambulatorio")
+    
+    # Build date range query
+    if mese:
+        start_date = f"{anno}-{mese:02d}-01"
+        if mese == 12:
+            end_date = f"{anno + 1}-01-01"
+        else:
+            end_date = f"{anno}-{mese + 1:02d}-01"
+    else:
+        start_date = f"{anno}-01-01"
+        end_date = f"{anno + 1}-01-01"
+    
+    # Query appointments with espianto prestazioni
+    espianto_types = ["espianto_picc", "espianto_picc_port", "espianto_midline"]
+    
+    query = {
+        "ambulatorio": ambulatorio.value,
+        "data": {"$gte": start_date, "$lt": end_date},
+        "prestazioni": {"$in": espianto_types}
+    }
+    
+    appointments = await db.appointments.find(query, {"_id": 0}).to_list(10000)
+    
+    # Count by type
+    tipo_counts = {
+        "espianto_picc": 0,
+        "espianto_picc_port": 0,
+        "espianto_midline": 0
+    }
+    monthly_breakdown = {}
+    
+    for apt in appointments:
+        prestazioni = apt.get("prestazioni", [])
+        data = apt.get("data", "")
+        month_key = data[:7] if data else ""
+        
+        for espianto_type in espianto_types:
+            if espianto_type in prestazioni:
+                tipo_counts[espianto_type] += 1
+                
+                if month_key:
+                    if month_key not in monthly_breakdown:
+                        monthly_breakdown[month_key] = {}
+                    monthly_breakdown[month_key][espianto_type] = monthly_breakdown[month_key].get(espianto_type, 0) + 1
+    
+    # Labels
+    tipo_labels = {
+        "espianto_picc": "Espianto PICC",
+        "espianto_picc_port": "Espianto PICC Port",
+        "espianto_midline": "Espianto Midline"
+    }
+    
+    totale = sum(tipo_counts.values())
+    
+    return {
+        "totale_espianti": totale,
         "per_tipo": tipo_counts,
         "tipo_labels": tipo_labels,
         "dettaglio_mensile": monthly_breakdown
@@ -2377,6 +2756,64 @@ async def execute_undo(action: dict, ambulatorio: str) -> dict:
             )
             return {"success": True, "message": f"↩️ Annullato: Giorno {day_key} rimosso dalla scheda"}
         
+        elif action_type == "create_multiple_patients":
+            # Annulla creazione multipla = elimina tutti i pazienti creati
+            patient_ids = undo_data.get("patient_ids", [])
+            for pid in patient_ids:
+                await db.patients.delete_one({"id": pid})
+            return {"success": True, "message": f"↩️ Annullato: {len(patient_ids)} pazienti eliminati"}
+        
+        elif action_type == "suspend_multiple_patients":
+            # Annulla sospensione multipla = ripristina stati precedenti
+            patients_data = undo_data.get("patients_data", [])
+            for pd in patients_data:
+                await db.patients.update_one(
+                    {"id": pd["patient_id"]},
+                    {"$set": {"status": pd["previous_status"], "updated_at": datetime.now(timezone.utc).isoformat()}}
+                )
+            return {"success": True, "message": f"↩️ Annullato: {len(patients_data)} pazienti ripristinati allo stato precedente"}
+        
+        elif action_type == "resume_multiple_patients":
+            # Annulla ripresa multipla = ripristina stati precedenti
+            patients_data = undo_data.get("patients_data", [])
+            for pd in patients_data:
+                await db.patients.update_one(
+                    {"id": pd["patient_id"]},
+                    {"$set": {"status": pd["previous_status"], "updated_at": datetime.now(timezone.utc).isoformat()}}
+                )
+            return {"success": True, "message": f"↩️ Annullato: {len(patients_data)} pazienti ripristinati allo stato precedente"}
+        
+        elif action_type == "discharge_multiple_patients":
+            # Annulla dimissione multipla = ripristina stati precedenti
+            patients_data = undo_data.get("patients_data", [])
+            for pd in patients_data:
+                update_data = {"status": pd["previous_status"], "updated_at": datetime.now(timezone.utc).isoformat()}
+                if "data_dimissione" in pd.get("previous_data", {}):
+                    update_data["data_dimissione"] = pd["previous_data"]["data_dimissione"]
+                await db.patients.update_one({"id": pd["patient_id"]}, {"$set": update_data})
+            return {"success": True, "message": f"↩️ Annullato: {len(patients_data)} pazienti ripristinati allo stato precedente"}
+        
+        elif action_type == "delete_multiple_patients":
+            # Annulla eliminazione multipla = ricrea tutti i pazienti con i loro dati
+            all_backup_data = undo_data.get("all_backup_data", [])
+            restored_count = 0
+            for backup in all_backup_data:
+                patient_data = backup.get("patient_data")
+                if patient_data:
+                    await db.patients.insert_one(patient_data)
+                    restored_count += 1
+                for apt in backup.get("appointments", []):
+                    await db.appointments.insert_one(apt)
+                for s in backup.get("schede_impianto", []):
+                    await db.schede_impianto_picc.insert_one(s)
+                for s in backup.get("schede_gestione", []):
+                    await db.schede_gestione_picc.insert_one(s)
+                for s in backup.get("schede_med", []):
+                    await db.schede_medicazione_med.insert_one(s)
+                for p in backup.get("prescrizioni", []):
+                    await db.prescrizioni.insert_one(p)
+            return {"success": True, "message": f"↩️ Annullato: {restored_count} pazienti ripristinati con tutti i loro dati"}
+        
         return {"success": False, "message": "❌ Tipo di azione non supportato per l'annullamento"}
         
     except Exception as e:
@@ -2388,12 +2825,13 @@ SYSTEM_PROMPT = """Sei un assistente IA dell'Ambulatorio Infermieristico. Il tuo
 DATA ODIERNA: {today}
 
 CAPACITÀ:
-1. **Gestire pazienti**: Creare, cercare, aprire, sospendere, riprendere in cura, dimettere, eliminare
-2. **Gestire appuntamenti**: Creare ed eliminare appuntamenti dall'agenda
+1. **Gestire pazienti**: Creare, cercare, aprire, sospendere, riprendere in cura, dimettere, eliminare (anche più pazienti contemporaneamente)
+2. **Gestire appuntamenti**: Creare ed eliminare appuntamenti dall'agenda (rispettando la categoria del paziente)
 3. **Statistiche**: Consultare e confrontare statistiche di mesi/anni diversi
 4. **Generare PDF**: Statistiche, cartelle pazienti (complete o sezioni specifiche)
 5. **Compilare schede**: Creare e copiare schede MED e PICC
 6. **Annullare azioni**: Puoi annullare le ultime 10 azioni con "annulla" o "undo"
+7. **Estrarre da foto**: Puoi estrarre una lista di pazienti da una foto caricata
 
 ORARI DISPONIBILI:
 - MATTINA: 08:30, 09:00, 09:30, 10:00, 10:30, 11:00, 11:30, 12:00, 12:30, 13:00
@@ -2414,38 +2852,65 @@ REGOLE IMPORTANTI:
 - I tipi impianto sono: picc, midline, picc_port, port_a_cath
 - Per i nomi: cerca prima per cognome, poi per nome
 - Interagisci in modo intelligente, chiedi conferme quando necessario
+- IMPORTANTE: Quando crei un appuntamento, usa SEMPRE il tipo del paziente (se è PICC va in agenda PICC, se è MED va in agenda MED)
+- Per operazioni batch su più pazienti, usa le azioni multiple (create_multiple_patients, etc.)
+- Se l'utente carica una foto con nomi di pazienti, usa extract_patients_from_image per estrarli
 
 FORMATO RISPOSTA:
-Per azioni, rispondi SOLO con JSON: {{"action": "...", "params": {{...}}, "message": "..."}}
+Per azioni, rispondi SOLO con JSON: {"action": "...", "params": {{...}, "message": "..."}}
 
 AZIONI DISPONIBILI:
-- create_patient: {{"nome": "...", "cognome": "...", "tipo": "PICC/MED/PICC_MED"}}
-- create_appointment: {{"patient_name": "cognome nome", "data": "YYYY-MM-DD", "ora": "HH:MM", "tipo": "PICC/MED", "turno": "mattina/pomeriggio/primo_disponibile"}}
-- delete_appointment: {{"patient_name": "cognome nome", "data": "YYYY-MM-DD", "ora": "HH:MM"}}
-- suspend_patient: {{"patient_name": "cognome nome"}} - Sospende temporaneamente il paziente
-- resume_patient: {{"patient_name": "cognome nome"}} - Riprende in cura il paziente sospeso
-- discharge_patient: {{"patient_name": "cognome nome"}} - Dimette il paziente
-- delete_patient: {{"patient_name": "cognome nome"}} - Elimina definitivamente il paziente
-- undo_action: {{}} - Annulla l'ultima azione (o {{"action_id": "..."}}} per annullare una specifica)
-- list_undo_actions: {{}} - Mostra le ultime 10 azioni annullabili
-- get_implant_statistics: {{"tipo_impianto": "picc/midline/picc_port/port_a_cath/tutti", "anno": 2025, "mese": 1-12 o null, "generate_pdf": true/false}}
-- get_prestazioni_statistics: {{"tipo": "PICC/MED/tutti", "anno": 2025, "mese": 1-12 o null, "generate_pdf": true/false}}
-- compare_statistics: {{"tipo": "PICC/MED/IMPIANTI/tutti", "periodo1": {{"anno": 2025, "mese": null}}, "periodo2": {{"anno": 2026, "mese": null}}, "generate_pdf": true/false}}
-- print_patient_folder: {{"patient_name": "cognome nome", "sezione": "completa/anagrafica/impianto/gestione_picc/scheda_med"}}
-- copy_scheda_med: {{"patient_name": "cognome nome", "nuova_data": "YYYY-MM-DD"}}
-- copy_scheda_gestione_picc: {{"patient_name": "cognome nome", "nuova_data": "YYYY-MM-DD"}}
-- open_patient: {{"patient_name": "cognome nome"}}
-- search_patient: {{"query": "..."}}
-- create_scheda_impianto: {{"patient_name": "cognome nome", "tipo_catetere": "picc/midline/picc_port/port_a_cath", "data_impianto": "YYYY-MM-DD"}}
+
+=== GESTIONE SINGOLO PAZIENTE ===
+- create_patient: {"nome": "...", "cognome": "...", "tipo": "PICC/MED/PICC_MED"}
+- suspend_patient: {"patient_name": "cognome nome"} - Sospende temporaneamente il paziente
+- resume_patient: {"patient_name": "cognome nome"} - Riprende in cura il paziente sospeso
+- discharge_patient: {"patient_name": "cognome nome"} - Dimette il paziente
+- delete_patient: {"patient_name": "cognome nome"} - Elimina definitivamente il paziente
+- open_patient: {"patient_name": "cognome nome"}
+- search_patient: {"query": "..."}
+
+=== GESTIONE MULTIPLA PAZIENTI (BATCH) ===
+- create_multiple_patients: {"patients": [{{"nome": "...", "cognome": "...", "tipo": "PICC/MED/PICC_MED"}, ...]}}
+- suspend_multiple_patients: {"patient_names": ["cognome nome", "cognome2 nome2", ...]}
+- resume_multiple_patients: {"patient_names": ["cognome nome", "cognome2 nome2", ...]}
+- discharge_multiple_patients: {"patient_names": ["cognome nome", "cognome2 nome2", ...]}
+- delete_multiple_patients: {"patient_names": ["cognome nome", "cognome2 nome2", ...]}
+
+=== ESTRAZIONE DA FOTO ===
+- extract_patients_from_image: {} - Richiede immagine allegata, estrae nomi pazienti
+- add_extracted_patients: {"patients": [{{"nome": "...", "cognome": "...", "tipo": "PICC/MED"}], "tipo_default": "PICC/MED"}}
+
+=== APPUNTAMENTI ===
+- create_appointment: {"patient_name": "cognome nome", "data": "YYYY-MM-DD", "ora": "HH:MM", "turno": "mattina/pomeriggio/primo_disponibile"}
+  NOTA: Il tipo (PICC/MED) viene preso automaticamente dal paziente!
+- delete_appointment: {"patient_name": "cognome nome", "data": "YYYY-MM-DD", "ora": "HH:MM"}
+
+=== STATISTICHE ===
+- get_implant_statistics: {"tipo_impianto": "picc/midline/picc_port/port_a_cath/tutti", "anno": 2025, "mese": 1-12 o null, "generate_pdf": true/false}
+- get_prestazioni_statistics: {"tipo": "PICC/MED/tutti", "anno": 2025, "mese": 1-12 o null, "generate_pdf": true/false}
+- compare_statistics: {"tipo": "PICC/MED/IMPIANTI/tutti", "periodo1": {{"anno": 2025, "mese": null}, "periodo2": {"anno": 2026, "mese": null}, "generate_pdf": true/false}}
+
+=== SCHEDE ===
+- create_scheda_impianto: {"patient_name": "cognome nome", "tipo_catetere": "picc/midline/picc_port/port_a_cath", "data_impianto": "YYYY-MM-DD"}
+- copy_scheda_med: {"patient_name": "cognome nome", "nuova_data": "YYYY-MM-DD"}
+- copy_scheda_gestione_picc: {"patient_name": "cognome nome", "nuova_data": "YYYY-MM-DD"}
+- print_patient_folder: {"patient_name": "cognome nome", "sezione": "completa/anagrafica/impianto/gestione_picc/scheda_med"}
+
+=== ANNULLA ===
+- undo_action: {} - Annulla l'ultima azione (o {"action_id": "..."}} per annullare una specifica)
+- list_undo_actions: {} - Mostra le ultime 10 azioni annullabili
 
 ESEMPI:
-- "Appuntamento per Rossi alle 15 di domani" -> {{"action": "create_appointment", "params": {{"patient_name": "Rossi", "data": "YYYY-MM-DD", "ora": "15:00"}}, "message": "Creo appuntamento..."}}
-- "Sospendi il paziente Bianchi" -> {{"action": "suspend_patient", "params": {{"patient_name": "Bianchi"}}, "message": "Sospendo il paziente..."}}
-- "Annulla" o "Torna indietro" -> {{"action": "undo_action", "params": {{}}, "message": "Annullo l'ultima azione..."}}
-- "Mostra azioni annullabili" -> {{"action": "list_undo_actions", "params": {{}}, "message": "Ecco le ultime azioni..."}}
-- "Elimina definitivamente il paziente Neri" -> {{"action": "delete_patient", "params": {{"patient_name": "Neri"}}, "message": "Elimino definitivamente..."}}
-- "Quanti PICC ho messo a maggio? Genera PDF" -> {{"action": "get_implant_statistics", "params": {{"tipo_impianto": "picc", "anno": 2025, "mese": 5, "generate_pdf": true}}, "message": "Genero statistiche e PDF..."}}
-- "Confronta statistiche 2025 vs 2026" -> {{"action": "compare_statistics", "params": {{"tipo": "tutti", "periodo1": {{"anno": 2025, "mese": null}}, "periodo2": {{"anno": 2026, "mese": null}}}}, "message": "Confronto i due anni..."}}
+- "Appuntamento per Rossi alle 15 di domani" -> {"action": "create_appointment", "params": {{"patient_name": "Rossi", "data": "YYYY-MM-DD", "ora": "15:00"}, "message": "Creo appuntamento..."}}
+- "Crea i pazienti: Rossi Mario PICC, Bianchi Luigi MED" -> {"action": "create_multiple_patients", "params": {{"patients": [{{"cognome": "Rossi", "nome": "Mario", "tipo": "PICC"}, {"cognome": "Bianchi", "nome": "Luigi", "tipo": "MED"}]}}, "message": "Creo i pazienti..."}}
+- "Sospendi Rossi, Bianchi e Verdi" -> {"action": "suspend_multiple_patients", "params": {{"patient_names": ["Rossi", "Bianchi", "Verdi"]}, "message": "Sospendo i pazienti..."}}
+- "Dimetti tutti questi pazienti: Rossi, Bianchi" -> {"action": "discharge_multiple_patients", "params": {{"patient_names": ["Rossi", "Bianchi"]}, "message": "Dimetto i pazienti..."}}
+- "Elimina i pazienti Rossi, Bianchi e Verdi" -> {"action": "delete_multiple_patients", "params": {{"patient_names": ["Rossi", "Bianchi", "Verdi"]}, "message": "Elimino i pazienti..."}}
+- "Giovanni Cammarata appuntamento il 12/1/26 ore 9" -> (cerca paziente, usa il suo tipo PICC/MED per l'appuntamento)
+- "Aggiungi questa lista di pazienti come PICC: [lista da foto]" -> {"action": "add_extracted_patients", "params": {{"patients": [...], "tipo_default": "PICC"}, "message": "Aggiungo i pazienti..."}}
+- "Annulla" -> {"action": "undo_action", "params": {{}, "message": "Annullo..."}}
+- "Quanti PICC ho messo a maggio? Genera PDF" -> {"action": "get_implant_statistics", "params": {{"tipo_impianto": "picc", "anno": 2025, "mese": 5, "generate_pdf": true}, "message": "..."}}
 
 Per domande generiche (es. "Ciao"), rispondi normalmente senza JSON."""
 
@@ -2471,7 +2936,7 @@ async def get_ai_response(message: str, session_id: str, ambulatorio: str, user_
         
         # Format system prompt with today's date
         today = datetime.now().strftime("%Y-%m-%d")
-        formatted_prompt = SYSTEM_PROMPT.format(today=today)
+        formatted_prompt = SYSTEM_PROMPT.replace("{today}", today)
         
         # Initialize chat
         chat = LlmChat(
@@ -3299,6 +3764,324 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
                 "filename": f"{patient['cognome']}_{patient['nome']}_{sezione}.pdf"
             }
         
+        # ==================== CREATE MULTIPLE PATIENTS (BATCH) ====================
+        elif action_type == "create_multiple_patients":
+            patients_data = params.get("patients", [])
+            
+            if not patients_data:
+                return {"success": False, "message": "❌ Nessun paziente da creare. Fornisci una lista di pazienti."}
+            
+            created = []
+            errors = []
+            patient_ids = []
+            
+            for p in patients_data:
+                try:
+                    patient_data = {
+                        "id": str(uuid.uuid4()),
+                        "nome": p.get("nome", ""),
+                        "cognome": p.get("cognome", ""),
+                        "tipo": p.get("tipo", "PICC"),
+                        "ambulatorio": ambulatorio,
+                        "status": "in_cura",
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(timezone.utc).isoformat()
+                    }
+                    await db.patients.insert_one(patient_data)
+                    created.append(f"{p.get('cognome', '')} {p.get('nome', '')} ({p.get('tipo', 'PICC')})")
+                    patient_ids.append(patient_data["id"])
+                except Exception as e:
+                    errors.append(f"{p.get('cognome', '')} {p.get('nome', '')}: {str(e)}")
+            
+            if created:
+                # Salva per undo
+                await save_undo_action(
+                    user_id, ambulatorio, "create_multiple_patients",
+                    f"Creati {len(created)} pazienti",
+                    {"patient_ids": patient_ids}
+                )
+            
+            msg = f"✅ **Creati {len(created)} pazienti:**\n\n"
+            for name in created:
+                msg += f"• {name}\n"
+            
+            if errors:
+                msg += f"\n\n⚠️ **Errori ({len(errors)}):**\n"
+                for err in errors:
+                    msg += f"• {err}\n"
+            
+            msg += "\n💡 Puoi annullare dicendo 'annulla'"
+            
+            return {"success": True, "created": len(created), "errors": len(errors), "message": msg, "can_undo": True}
+        
+        # ==================== SUSPEND MULTIPLE PATIENTS (BATCH) ====================
+        elif action_type == "suspend_multiple_patients":
+            patient_names = params.get("patient_names", [])
+            
+            if not patient_names:
+                return {"success": False, "message": "❌ Nessun paziente specificato."}
+            
+            suspended = []
+            errors = []
+            undo_data = []
+            
+            for name in patient_names:
+                patient = await find_patient(name)
+                if not patient:
+                    errors.append(f"{name}: non trovato")
+                    continue
+                
+                if patient.get("status") == "sospeso":
+                    errors.append(f"{patient['cognome']} {patient['nome']}: già sospeso")
+                    continue
+                
+                previous_status = patient.get("status", "in_cura")
+                undo_data.append({"patient_id": patient["id"], "previous_status": previous_status})
+                
+                await db.patients.update_one(
+                    {"id": patient["id"]},
+                    {"$set": {"status": "sospeso", "updated_at": datetime.now(timezone.utc).isoformat()}}
+                )
+                suspended.append(f"{patient['cognome']} {patient['nome']}")
+            
+            if suspended:
+                await save_undo_action(
+                    user_id, ambulatorio, "suspend_multiple_patients",
+                    f"Sospesi {len(suspended)} pazienti",
+                    {"patients_data": undo_data}
+                )
+            
+            msg = f"✅ **Sospesi {len(suspended)} pazienti:**\n\n"
+            for name in suspended:
+                msg += f"• {name}\n"
+            
+            if errors:
+                msg += f"\n⚠️ **Non processati ({len(errors)}):**\n"
+                for err in errors:
+                    msg += f"• {err}\n"
+            
+            msg += "\n💡 Puoi annullare dicendo 'annulla'"
+            
+            return {"success": True, "suspended": len(suspended), "errors": len(errors), "message": msg, "can_undo": True}
+        
+        # ==================== RESUME MULTIPLE PATIENTS (BATCH) ====================
+        elif action_type == "resume_multiple_patients":
+            patient_names = params.get("patient_names", [])
+            
+            if not patient_names:
+                return {"success": False, "message": "❌ Nessun paziente specificato."}
+            
+            resumed = []
+            errors = []
+            undo_data = []
+            
+            for name in patient_names:
+                patient = await find_patient(name)
+                if not patient:
+                    errors.append(f"{name}: non trovato")
+                    continue
+                
+                if patient.get("status") == "in_cura":
+                    errors.append(f"{patient['cognome']} {patient['nome']}: già in cura")
+                    continue
+                
+                previous_status = patient.get("status", "sospeso")
+                undo_data.append({"patient_id": patient["id"], "previous_status": previous_status})
+                
+                await db.patients.update_one(
+                    {"id": patient["id"]},
+                    {"$set": {"status": "in_cura", "updated_at": datetime.now(timezone.utc).isoformat()}}
+                )
+                resumed.append(f"{patient['cognome']} {patient['nome']}")
+            
+            if resumed:
+                await save_undo_action(
+                    user_id, ambulatorio, "resume_multiple_patients",
+                    f"Ripresi in cura {len(resumed)} pazienti",
+                    {"patients_data": undo_data}
+                )
+            
+            msg = f"✅ **Ripresi in cura {len(resumed)} pazienti:**\n\n"
+            for name in resumed:
+                msg += f"• {name}\n"
+            
+            if errors:
+                msg += f"\n⚠️ **Non processati ({len(errors)}):**\n"
+                for err in errors:
+                    msg += f"• {err}\n"
+            
+            msg += "\n💡 Puoi annullare dicendo 'annulla'"
+            
+            return {"success": True, "resumed": len(resumed), "errors": len(errors), "message": msg, "can_undo": True}
+        
+        # ==================== DISCHARGE MULTIPLE PATIENTS (BATCH) ====================
+        elif action_type == "discharge_multiple_patients":
+            patient_names = params.get("patient_names", [])
+            
+            if not patient_names:
+                return {"success": False, "message": "❌ Nessun paziente specificato."}
+            
+            discharged = []
+            errors = []
+            undo_data = []
+            
+            for name in patient_names:
+                patient = await find_patient(name)
+                if not patient:
+                    errors.append(f"{name}: non trovato")
+                    continue
+                
+                if patient.get("status") == "dimesso":
+                    errors.append(f"{patient['cognome']} {patient['nome']}: già dimesso")
+                    continue
+                
+                previous_status = patient.get("status", "in_cura")
+                previous_data = {"data_dimissione": patient.get("data_dimissione")}
+                undo_data.append({"patient_id": patient["id"], "previous_status": previous_status, "previous_data": previous_data})
+                
+                await db.patients.update_one(
+                    {"id": patient["id"]},
+                    {"$set": {"status": "dimesso", "data_dimissione": datetime.now().strftime("%Y-%m-%d"), "updated_at": datetime.now(timezone.utc).isoformat()}}
+                )
+                discharged.append(f"{patient['cognome']} {patient['nome']}")
+            
+            if discharged:
+                await save_undo_action(
+                    user_id, ambulatorio, "discharge_multiple_patients",
+                    f"Dimessi {len(discharged)} pazienti",
+                    {"patients_data": undo_data}
+                )
+            
+            msg = f"✅ **Dimessi {len(discharged)} pazienti:**\n\n"
+            for name in discharged:
+                msg += f"• {name}\n"
+            
+            if errors:
+                msg += f"\n⚠️ **Non processati ({len(errors)}):**\n"
+                for err in errors:
+                    msg += f"• {err}\n"
+            
+            msg += "\n💡 Puoi annullare dicendo 'annulla'"
+            
+            return {"success": True, "discharged": len(discharged), "errors": len(errors), "message": msg, "can_undo": True}
+        
+        # ==================== DELETE MULTIPLE PATIENTS (BATCH) ====================
+        elif action_type == "delete_multiple_patients":
+            patient_names = params.get("patient_names", [])
+            
+            if not patient_names:
+                return {"success": False, "message": "❌ Nessun paziente specificato."}
+            
+            deleted = []
+            errors = []
+            all_backup_data = []
+            
+            for name in patient_names:
+                patient = await find_patient(name)
+                if not patient:
+                    errors.append(f"{name}: non trovato")
+                    continue
+                
+                patient_id = patient["id"]
+                nome_completo = f"{patient['cognome']} {patient['nome']}"
+                
+                # Backup data for undo
+                patient_data = {k: v for k, v in patient.items() if k != "_id"}
+                appointments = await db.appointments.find({"patient_id": patient_id}, {"_id": 0}).to_list(1000)
+                schede_impianto = await db.schede_impianto_picc.find({"patient_id": patient_id}, {"_id": 0}).to_list(100)
+                schede_gestione = await db.schede_gestione_picc.find({"patient_id": patient_id}, {"_id": 0}).to_list(100)
+                schede_med = await db.schede_medicazione_med.find({"patient_id": patient_id}, {"_id": 0}).to_list(100)
+                prescrizioni_list = await db.prescrizioni.find({"patient_id": patient_id}, {"_id": 0}).to_list(100)
+                
+                all_backup_data.append({
+                    "patient_data": patient_data,
+                    "appointments": appointments,
+                    "schede_impianto": schede_impianto,
+                    "schede_gestione": schede_gestione,
+                    "schede_med": schede_med,
+                    "prescrizioni": prescrizioni_list
+                })
+                
+                # Delete all related data
+                await db.appointments.delete_many({"patient_id": patient_id})
+                await db.schede_impianto_picc.delete_many({"patient_id": patient_id})
+                await db.schede_gestione_picc.delete_many({"patient_id": patient_id})
+                await db.schede_medicazione_med.delete_many({"patient_id": patient_id})
+                await db.prescrizioni.delete_many({"patient_id": patient_id})
+                await db.patients.delete_one({"id": patient_id})
+                
+                deleted.append(nome_completo)
+            
+            if deleted:
+                await save_undo_action(
+                    user_id, ambulatorio, "delete_multiple_patients",
+                    f"Eliminati {len(deleted)} pazienti",
+                    {"all_backup_data": all_backup_data}
+                )
+            
+            msg = f"✅ **Eliminati definitivamente {len(deleted)} pazienti:**\n\n"
+            for name in deleted:
+                msg += f"• {name}\n"
+            
+            if errors:
+                msg += f"\n⚠️ **Non trovati ({len(errors)}):**\n"
+                for err in errors:
+                    msg += f"• {err}\n"
+            
+            msg += "\n\n⚠️ Tutti i dati dei pazienti sono stati eliminati.\n💡 **IMPORTANTE**: Puoi ancora annullare questa azione dicendo 'annulla'!"
+            
+            return {"success": True, "deleted": len(deleted), "errors": len(errors), "message": msg, "can_undo": True}
+        
+        # ==================== ADD EXTRACTED PATIENTS (from image) ====================
+        elif action_type == "add_extracted_patients":
+            patients_data = params.get("patients", [])
+            tipo_default = params.get("tipo_default", "PICC")
+            
+            if not patients_data:
+                return {"success": False, "message": "❌ Nessun paziente da aggiungere. Prima carica una foto con i nomi dei pazienti."}
+            
+            created = []
+            errors = []
+            patient_ids = []
+            
+            for p in patients_data:
+                try:
+                    patient_data = {
+                        "id": str(uuid.uuid4()),
+                        "nome": p.get("nome", ""),
+                        "cognome": p.get("cognome", ""),
+                        "tipo": p.get("tipo", tipo_default),
+                        "ambulatorio": ambulatorio,
+                        "status": "in_cura",
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(timezone.utc).isoformat()
+                    }
+                    await db.patients.insert_one(patient_data)
+                    created.append(f"{p.get('cognome', '')} {p.get('nome', '')} ({p.get('tipo', tipo_default)})")
+                    patient_ids.append(patient_data["id"])
+                except Exception as e:
+                    errors.append(f"{p.get('cognome', '')} {p.get('nome', '')}: {str(e)}")
+            
+            if created:
+                await save_undo_action(
+                    user_id, ambulatorio, "create_multiple_patients",
+                    f"Creati {len(created)} pazienti da foto",
+                    {"patient_ids": patient_ids}
+                )
+            
+            msg = f"✅ **Creati {len(created)} pazienti dalla foto:**\n\n"
+            for name in created:
+                msg += f"• {name}\n"
+            
+            if errors:
+                msg += f"\n\n⚠️ **Errori ({len(errors)}):**\n"
+                for err in errors:
+                    msg += f"• {err}\n"
+            
+            msg += "\n💡 Puoi annullare dicendo 'annulla'"
+            
+            return {"success": True, "created": len(created), "errors": len(errors), "message": msg, "can_undo": True}
+        
         return {"success": False, "message": "❌ Azione non riconosciuta. Prova a riformulare la richiesta."}
         
     except Exception as e:
@@ -3359,6 +4142,127 @@ async def ai_chat(
         "session_id": session_id,
         "action_performed": action_result
     }
+
+# Import for image processing - use OpenAI directly for vision
+import openai
+
+@api_router.post("/ai/extract-from-image")
+async def extract_patients_from_image(
+    ambulatorio: str = Form(...),
+    tipo_default: str = Form("PICC"),
+    file: UploadFile = File(...),
+    payload: dict = Depends(verify_token)
+):
+    """Extract patient names from an uploaded image using AI vision"""
+    if ambulatorio not in payload["ambulatori"]:
+        raise HTTPException(status_code=403, detail="Non hai accesso a questo ambulatorio")
+    
+    try:
+        api_key = os.environ.get('EMERGENT_LLM_KEY')
+        if not api_key:
+            raise HTTPException(status_code=500, detail="Chiave API non configurata")
+        
+        # Read and encode image
+        contents = await file.read()
+        image_base64 = base64.b64encode(contents).decode('utf-8')
+        
+        # Determine content type
+        content_type = file.content_type or "image/png"
+        
+        # Use OpenAI directly with vision capability
+        client = openai.AsyncOpenAI(
+            api_key=api_key,
+            base_url="https://integrations.emergentagent.com/llm/openai/v1"
+        )
+        
+        # Create the message with image
+        response = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": """Sei un assistente che estrae nomi di pazienti da immagini di liste o elenchi.
+Analizza l'immagine e estrai TUTTI i nomi di persone che vedi nell'elenco.
+Restituisci SOLO un JSON valido nel formato:
+{
+    "patients": [
+        {"cognome": "Rossi", "nome": "Mario"},
+        {"cognome": "Bianchi", "nome": "Luigi"}
+    ]
+}
+IMPORTANTE: 
+- Estrai TUTTI i nomi visibili nell'immagine
+- Il cognome va prima del nome
+- Non includere altro testo, solo il JSON
+Se non riesci a identificare nomi, restituisci: {"patients": [], "error": "Nessun nome identificato"}"""
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Estrai tutti i nomi di persone (cognome e nome) da questa immagine. Restituisci solo il JSON con la lista completa dei pazienti."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{content_type};base64,{image_base64}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=4096
+        )
+        
+        response_text = response.choices[0].message.content
+        logger.info(f"AI Vision response: {response_text[:500]}")
+        
+        # Parse response
+        try:
+            # Try to find JSON in the response
+            # Handle markdown code blocks
+            if "```json" in response_text:
+                json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
+                if json_match:
+                    result = json.loads(json_match.group(1))
+                else:
+                    result = json.loads(response_text.strip())
+            elif "```" in response_text:
+                json_match = re.search(r'```\s*(.*?)\s*```', response_text, re.DOTALL)
+                if json_match:
+                    result = json.loads(json_match.group(1))
+                else:
+                    result = json.loads(response_text.strip())
+            else:
+                # Try to find JSON object directly
+                json_match = re.search(r'\{.*"patients".*\}', response_text, re.DOTALL)
+                if json_match:
+                    result = json.loads(json_match.group())
+                else:
+                    result = json.loads(response_text.strip())
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parse error: {e}, response: {response_text}")
+            result = {"patients": [], "raw_response": response_text, "error": str(e)}
+        
+        patients = result.get("patients", [])
+        
+        # Add default type to each patient
+        for p in patients:
+            if "tipo" not in p:
+                p["tipo"] = tipo_default
+        
+        return {
+            "success": True,
+            "patients": patients,
+            "count": len(patients),
+            "tipo_default": tipo_default,
+            "message": f"Estratti {len(patients)} pazienti dall'immagine"
+        }
+        
+    except Exception as e:
+        logger.error(f"Image extraction error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Errore nell'estrazione: {str(e)}")
 
 @api_router.get("/ai/history")
 async def get_ai_history(

@@ -15,6 +15,7 @@ import PatientDetailPage from "@/pages/PatientDetailPage";
 import ModulisticaPage from "@/pages/ModulisticaPage";
 import StatistichePage from "@/pages/StatistichePage";
 import PrescrizioniPage from "@/pages/PrescrizioniPage";
+import ImpiantiPage from "@/pages/ImpiantiPage";
 import Layout from "@/components/Layout";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -193,6 +194,7 @@ function AppContent() {
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="dashboard" element={<DashboardPage />} />
               <Route path="agenda" element={<AgendaPage />} />
+              <Route path="impianti" element={<ImpiantiPage />} />
               <Route path="pazienti" element={<PazientiPage />} />
               <Route path="pazienti/:patientId" element={<PatientDetailPage />} />
               <Route path="prescrizioni" element={<PrescrizioniPage />} />

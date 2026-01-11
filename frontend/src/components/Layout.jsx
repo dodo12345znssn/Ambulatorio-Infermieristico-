@@ -30,6 +30,7 @@ import {
   ZoomIn,
   ZoomOut,
   Type,
+  Activity,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import AIAssistant from "@/components/AIAssistant";
@@ -43,7 +44,7 @@ const BOTTOM_NAV_ITEMS = [
   { path: "/statistiche", label: "Statistiche", icon: BarChart3 },
 ];
 
-// All nav items for sidebar
+// All nav items for sidebar (includes impianti as it's on dashboard)
 const ALL_NAV_ITEMS = [
   { path: "/dashboard", label: "Home", icon: Home },
   ...BOTTOM_NAV_ITEMS,

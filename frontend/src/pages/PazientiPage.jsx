@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -38,6 +39,10 @@ import {
   Trash2,
   Filter,
   ChevronDown,
+  CheckSquare,
+  Square,
+  ListChecks,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -156,8 +161,11 @@ export default function PazientiPage() {
   const [activeTab, setActiveTab] = useState("in_cura");
   const [typeFilter, setTypeFilter] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [batchDialogOpen, setBatchDialogOpen] = useState(false);
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [batchStatusDialogOpen, setBatchStatusDialogOpen] = useState(false);
+  const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false);
   const [selectedPatientForStatus, setSelectedPatientForStatus] = useState(null);
   const [selectedPatientForDelete, setSelectedPatientForDelete] = useState(null);
   const [newStatus, setNewStatus] = useState("");
@@ -168,6 +176,14 @@ export default function PazientiPage() {
     cognome: "",
     tipo: "",
   });
+  
+  // Batch selection state
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedPatients, setSelectedPatients] = useState(new Set());
+  const [batchAction, setBatchAction] = useState(null); // 'suspend', 'resume', 'discharge', 'delete'
+  
+  // Batch create state
+  const [batchPatients, setBatchPatients] = useState([{ nome: "", cognome: "", tipo: "" }]);
 
   const isVillaGinestre = ambulatorio === "villa_ginestre";
   const availableTypes = isVillaGinestre 
@@ -215,6 +231,11 @@ export default function PazientiPage() {
     fetchAllPatients();
   }, [fetchAllPatients]);
 
+  // Clear selection when changing tab
+  useEffect(() => {
+    setSelectedPatients(new Set());
+  }, [activeTab]);
+
   // Filter patients based on active tab, search, and type filter
   const filteredPatients = allPatients[activeTab]?.filter(p => {
     if (searchQuery) {
@@ -260,6 +281,53 @@ export default function PazientiPage() {
     } catch (error) {
       toast.error(error.response?.data?.detail || "Errore nella creazione");
     }
+  };
+
+  // Batch create patients
+  const handleBatchCreate = async () => {
+    const validPatients = batchPatients.filter(p => p.nome && p.cognome && p.tipo);
+    if (validPatients.length === 0) {
+      toast.error("Inserisci almeno un paziente completo");
+      return;
+    }
+
+    try {
+      const response = await apiClient.post("/patients/batch", {
+        patients: validPatients.map(p => ({
+          ...p,
+          ambulatorio,
+        }))
+      });
+      
+      if (response.data.created > 0) {
+        toast.success(`${response.data.created} pazienti creati con successo`);
+      }
+      if (response.data.errors > 0) {
+        toast.warning(`${response.data.errors} pazienti non creati`);
+      }
+      
+      setBatchDialogOpen(false);
+      setBatchPatients([{ nome: "", cognome: "", tipo: "" }]);
+      fetchAllPatients();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Errore nella creazione");
+    }
+  };
+
+  const addBatchPatientRow = () => {
+    setBatchPatients([...batchPatients, { nome: "", cognome: "", tipo: "" }]);
+  };
+
+  const removeBatchPatientRow = (index) => {
+    if (batchPatients.length > 1) {
+      setBatchPatients(batchPatients.filter((_, i) => i !== index));
+    }
+  };
+
+  const updateBatchPatient = (index, field, value) => {
+    const updated = [...batchPatients];
+    updated[index][field] = value;
+    setBatchPatients(updated);
   };
 
   const openStatusDialog = (patient, targetStatus, e) => {
@@ -333,6 +401,110 @@ export default function PazientiPage() {
     }
   };
 
+  // Batch operations
+  const togglePatientSelection = (patientId, e) => {
+    e.stopPropagation();
+    const newSelected = new Set(selectedPatients);
+    if (newSelected.has(patientId)) {
+      newSelected.delete(patientId);
+    } else {
+      newSelected.add(patientId);
+    }
+    setSelectedPatients(newSelected);
+  };
+
+  const selectAllFiltered = () => {
+    const newSelected = new Set(filteredPatients.map(p => p.id));
+    setSelectedPatients(newSelected);
+  };
+
+  const deselectAll = () => {
+    setSelectedPatients(new Set());
+  };
+
+  const openBatchStatusDialog = (action) => {
+    if (selectedPatients.size === 0) {
+      toast.warning("Seleziona almeno un paziente");
+      return;
+    }
+    setBatchAction(action);
+    setNewStatus(action === 'suspend' ? 'sospeso' : action === 'resume' ? 'in_cura' : 'dimesso');
+    setStatusReason("");
+    setStatusNotes("");
+    setBatchStatusDialogOpen(true);
+  };
+
+  const openBatchDeleteDialog = () => {
+    if (selectedPatients.size === 0) {
+      toast.warning("Seleziona almeno un paziente");
+      return;
+    }
+    setBatchDeleteDialogOpen(true);
+  };
+
+  const handleBatchStatusChange = async () => {
+    if (selectedPatients.size === 0) return;
+    
+    if (newStatus === "dimesso" && !statusReason) {
+      toast.error("Seleziona una motivazione per la dimissione");
+      return;
+    }
+    if (newStatus === "sospeso" && !statusNotes) {
+      toast.error("Inserisci una nota per la sospensione");
+      return;
+    }
+
+    try {
+      const response = await apiClient.put("/patients/batch/status", {
+        patient_ids: Array.from(selectedPatients),
+        status: newStatus,
+        discharge_reason: statusReason,
+        discharge_notes: statusNotes,
+        suspend_notes: statusNotes,
+      });
+      
+      const statusLabels = {
+        in_cura: "ripresi in cura",
+        dimesso: "dimessi",
+        sospeso: "sospesi",
+      };
+      
+      toast.success(`${response.data.updated} pazienti ${statusLabels[newStatus]}`);
+      if (response.data.errors > 0) {
+        toast.warning(`${response.data.errors} pazienti non processati`);
+      }
+      
+      setBatchStatusDialogOpen(false);
+      setSelectedPatients(new Set());
+      setSelectionMode(false);
+      fetchAllPatients();
+    } catch (error) {
+      toast.error("Errore nel cambio stato");
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedPatients.size === 0) return;
+    
+    try {
+      const response = await apiClient.post("/patients/batch/delete", {
+        patient_ids: Array.from(selectedPatients)
+      });
+      
+      toast.success(`${response.data.deleted} pazienti eliminati`);
+      if (response.data.errors > 0) {
+        toast.warning(`${response.data.errors} pazienti non eliminati`);
+      }
+      
+      setBatchDeleteDialogOpen(false);
+      setSelectedPatients(new Set());
+      setSelectionMode(false);
+      fetchAllPatients();
+    } catch (error) {
+      toast.error("Errore nell'eliminazione");
+    }
+  };
+
   const getTypeColor = (tipo) => {
     const type = PATIENT_TYPES.find(t => t.value === tipo);
     return type?.color || "bg-gray-100 text-gray-700";
@@ -374,6 +546,11 @@ export default function PazientiPage() {
     return actions;
   };
 
+  const getSelectedPatientNames = () => {
+    const selected = filteredPatients.filter(p => selectedPatients.has(p.id));
+    return selected.map(p => `${p.cognome} ${p.nome}`);
+  };
+
   return (
     <div className="animate-fade-in" data-testid="pazienti-page">
       {/* Header */}
@@ -385,11 +562,71 @@ export default function PazientiPage() {
           </p>
         </div>
 
-        <Button onClick={() => setDialogOpen(true)} data-testid="create-patient-btn">
-          <Plus className="w-4 h-4 mr-2" />
-          Nuovo Paziente
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            variant={selectionMode ? "secondary" : "outline"} 
+            onClick={() => {
+              setSelectionMode(!selectionMode);
+              if (selectionMode) {
+                setSelectedPatients(new Set());
+              }
+            }}
+            data-testid="selection-mode-btn"
+          >
+            <ListChecks className="w-4 h-4 mr-2" />
+            {selectionMode ? "Esci Selezione" : "Seleziona Multipli"}
+          </Button>
+          <Button variant="outline" onClick={() => setBatchDialogOpen(true)} data-testid="batch-create-btn">
+            <Plus className="w-4 h-4 mr-2" />
+            Aggiungi Multipli
+          </Button>
+          <Button onClick={() => setDialogOpen(true)} data-testid="create-patient-btn">
+            <Plus className="w-4 h-4 mr-2" />
+            Nuovo Paziente
+          </Button>
+        </div>
       </div>
+
+      {/* Batch Action Bar */}
+      {selectionMode && selectedPatients.size > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary" className="text-blue-700">
+              {selectedPatients.size} selezionati
+            </Badge>
+            <Button variant="ghost" size="sm" onClick={selectAllFiltered}>
+              Seleziona tutti ({filteredPatients.length})
+            </Button>
+            <Button variant="ghost" size="sm" onClick={deselectAll}>
+              Deseleziona
+            </Button>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            {activeTab !== "in_cura" && (
+              <Button size="sm" variant="outline" className="text-green-600 border-green-200 hover:bg-green-50" onClick={() => openBatchStatusDialog('resume')}>
+                <Play className="w-4 h-4 mr-1" />
+                Riprendi in Cura
+              </Button>
+            )}
+            {activeTab !== "sospeso" && (
+              <Button size="sm" variant="outline" className="text-orange-600 border-orange-200 hover:bg-orange-50" onClick={() => openBatchStatusDialog('suspend')}>
+                <Pause className="w-4 h-4 mr-1" />
+                Sospendi
+              </Button>
+            )}
+            {activeTab !== "dimesso" && (
+              <Button size="sm" variant="outline" className="text-slate-600 border-slate-200 hover:bg-slate-50" onClick={() => openBatchStatusDialog('discharge')}>
+                <UserX className="w-4 h-4 mr-1" />
+                Dimetti
+              </Button>
+            )}
+            <Button size="sm" variant="outline" className="text-red-600 border-red-200 hover:bg-red-50" onClick={openBatchDeleteDialog}>
+              <Trash2 className="w-4 h-4 mr-1" />
+              Elimina
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Patient Counters */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -508,9 +745,21 @@ export default function PazientiPage() {
                 <Card
                   key={patient.id}
                   data-testid={`patient-card-${patient.id}`}
-                  className="patient-card cursor-pointer hover:border-primary/50"
-                  onClick={() => navigate(`/pazienti/${patient.id}`)}
+                  className={`patient-card cursor-pointer hover:border-primary/50 ${selectedPatients.has(patient.id) ? 'ring-2 ring-blue-500 bg-blue-50' : ''}`}
+                  onClick={() => selectionMode ? togglePatientSelection(patient.id, { stopPropagation: () => {} }) : navigate(`/pazienti/${patient.id}`)}
                 >
+                  {selectionMode && (
+                    <div 
+                      className="mr-2 flex items-center"
+                      onClick={(e) => togglePatientSelection(patient.id, e)}
+                    >
+                      {selectedPatients.has(patient.id) ? (
+                        <CheckSquare className="w-5 h-5 text-blue-600" />
+                      ) : (
+                        <Square className="w-5 h-5 text-gray-400" />
+                      )}
+                    </div>
+                  )}
                   <div className="patient-avatar">
                     {getInitials(patient.nome, patient.cognome)}
                   </div>
@@ -531,45 +780,49 @@ export default function PazientiPage() {
                     </div>
                   </div>
                   
-                  {/* Status Actions Dropdown */}
-                  <SimpleDropdown
-                    trigger={
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
-                        <MoreVertical className="w-4 h-4" />
-                      </Button>
-                    }
-                  >
-                    {getStatusActions(patient).map((action) => (
-                      <DropdownItem
-                        key={action.status}
-                        onClick={(e) => openStatusDialog(patient, action.status, e)}
-                        icon={action.icon}
-                        className={action.color}
+                  {!selectionMode && (
+                    <>
+                      {/* Status Actions Dropdown */}
+                      <SimpleDropdown
+                        trigger={
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <MoreVertical className="w-4 h-4" />
+                          </Button>
+                        }
                       >
-                        {action.label}
-                      </DropdownItem>
-                    ))}
-                    <DropdownSeparator />
-                    <DropdownItem
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/pazienti/${patient.id}`);
-                      }}
-                      icon={ChevronRight}
-                    >
-                      Apri Cartella
-                    </DropdownItem>
-                    <DropdownSeparator />
-                    <DropdownItem
-                      onClick={(e) => openDeleteDialog(patient, e)}
-                      icon={Trash2}
-                      className="text-destructive"
-                    >
-                      Elimina Definitivamente
-                    </DropdownItem>
-                  </SimpleDropdown>
-                  
-                  <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                        {getStatusActions(patient).map((action) => (
+                          <DropdownItem
+                            key={action.status}
+                            onClick={(e) => openStatusDialog(patient, action.status, e)}
+                            icon={action.icon}
+                            className={action.color}
+                          >
+                            {action.label}
+                          </DropdownItem>
+                        ))}
+                        <DropdownSeparator />
+                        <DropdownItem
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/pazienti/${patient.id}`);
+                          }}
+                          icon={ChevronRight}
+                        >
+                          Apri Cartella
+                        </DropdownItem>
+                        <DropdownSeparator />
+                        <DropdownItem
+                          onClick={(e) => openDeleteDialog(patient, e)}
+                          icon={Trash2}
+                          className="text-destructive"
+                        >
+                          Elimina Definitivamente
+                        </DropdownItem>
+                      </SimpleDropdown>
+                      
+                      <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                    </>
+                  )}
                 </Card>
               ))}
             </div>
@@ -634,6 +887,70 @@ export default function PazientiPage() {
                 data-testid="confirm-create-patient-btn"
               >
                 Crea e Apri Cartella
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Batch Create Dialog */}
+      <Dialog open={batchDialogOpen} onOpenChange={setBatchDialogOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Aggiungi Più Pazienti</DialogTitle>
+            <DialogDescription>
+              Inserisci i dati di più pazienti contemporaneamente
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {batchPatients.map((patient, index) => (
+              <div key={index} className="flex gap-2 items-start p-3 bg-gray-50 rounded-lg">
+                <div className="flex-1 grid grid-cols-3 gap-2">
+                  <Input
+                    placeholder="Cognome"
+                    value={patient.cognome}
+                    onChange={(e) => updateBatchPatient(index, 'cognome', e.target.value)}
+                  />
+                  <Input
+                    placeholder="Nome"
+                    value={patient.nome}
+                    onChange={(e) => updateBatchPatient(index, 'nome', e.target.value)}
+                  />
+                  <SimpleSelect
+                    value={patient.tipo}
+                    onChange={(value) => updateBatchPatient(index, 'tipo', value)}
+                    options={patientTypeOptions}
+                    placeholder="Tipo"
+                  />
+                </div>
+                {batchPatients.length > 1 && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-10 w-10 text-red-500"
+                    onClick={() => removeBatchPatientRow(index)}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                )}
+              </div>
+            ))}
+
+            <Button variant="outline" onClick={addBatchPatientRow} className="w-full">
+              <Plus className="w-4 h-4 mr-2" />
+              Aggiungi Riga
+            </Button>
+
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <Button variant="outline" onClick={() => {
+                setBatchDialogOpen(false);
+                setBatchPatients([{ nome: "", cognome: "", tipo: "" }]);
+              }}>
+                Annulla
+              </Button>
+              <Button onClick={handleBatchCreate}>
+                Crea {batchPatients.filter(p => p.nome && p.cognome && p.tipo).length} Pazienti
               </Button>
             </div>
           </div>
@@ -710,6 +1027,77 @@ export default function PazientiPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Batch Status Change Dialog */}
+      <Dialog open={batchStatusDialogOpen} onOpenChange={setBatchStatusDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {newStatus === "in_cura" && "Riprendi in Cura"}
+              {newStatus === "dimesso" && "Dimetti Pazienti"}
+              {newStatus === "sospeso" && "Sospendi Pazienti"}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedPatients.size} pazienti selezionati
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="max-h-32 overflow-y-auto bg-gray-50 rounded-lg p-2">
+              {getSelectedPatientNames().map((name, i) => (
+                <div key={i} className="text-sm py-1">• {name}</div>
+              ))}
+            </div>
+
+            {newStatus === "in_cura" && (
+              <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+                <p className="text-sm text-green-800">
+                  I pazienti verranno riportati in stato &quot;In Cura&quot;.
+                </p>
+              </div>
+            )}
+
+            {newStatus === "dimesso" && (
+              <div className="space-y-2">
+                <Label>Motivazione *</Label>
+                <SimpleSelect
+                  value={statusReason}
+                  onChange={setStatusReason}
+                  options={dischargeReasonOptions}
+                  placeholder="Seleziona motivazione"
+                />
+              </div>
+            )}
+
+            {(newStatus === "sospeso" || (newStatus === "dimesso" && statusReason)) && (
+              <div className="space-y-2">
+                <Label>
+                  {newStatus === "sospeso" ? "Motivo Sospensione *" : "Note"}
+                </Label>
+                <Textarea
+                  value={statusNotes}
+                  onChange={(e) => setStatusNotes(e.target.value)}
+                  placeholder={
+                    newStatus === "sospeso"
+                      ? "Inserisci il motivo della sospensione..."
+                      : "Note aggiuntive..."
+                  }
+                  rows={3}
+                />
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-4">
+              <Button variant="outline" onClick={() => setBatchStatusDialogOpen(false)}>
+                Annulla
+              </Button>
+              <Button onClick={handleBatchStatusChange}>
+                Conferma ({selectedPatients.size} pazienti)
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
@@ -732,6 +1120,32 @@ export default function PazientiPage() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Elimina Definitivamente
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Batch Delete Confirmation Dialog */}
+      <AlertDialog open={batchDeleteDialogOpen} onOpenChange={setBatchDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminare definitivamente {selectedPatients.size} pazienti?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <div className="max-h-32 overflow-y-auto bg-gray-50 rounded-lg p-2 my-2">
+                {getSelectedPatientNames().map((name, i) => (
+                  <div key={i} className="text-sm py-1">• {name}</div>
+                ))}
+              </div>
+              Questa azione è irreversibile e cancellerà tutti i dati, le schede e lo storico dei pazienti.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annulla</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleBatchDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Elimina {selectedPatients.size} Pazienti
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

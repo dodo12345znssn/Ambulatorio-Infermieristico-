@@ -19,7 +19,10 @@ import {
   GripHorizontal,
   Download,
   Minimize2,
-  Maximize2
+  Maximize2,
+  Image,
+  Upload,
+  Check
 } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
@@ -42,6 +45,12 @@ export default function AIAssistant() {
   const [position, setPosition] = useState({ x: null, y: null });
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  
+  // Image upload state
+  const [pendingImage, setPendingImage] = useState(null);
+  const [extractedPatients, setExtractedPatients] = useState([]);
+  const [isExtracting, setIsExtracting] = useState(false);
+  const fileInputRef = useRef(null);
   
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -286,12 +295,137 @@ export default function AIAssistant() {
     }
   };
 
+  // Image upload and extraction
+  const handleImageSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (!file.type.startsWith('image/')) {
+        toast.error("Seleziona un'immagine valida (JPG, PNG, WEBP)");
+        return;
+      }
+      setPendingImage(file);
+      setExtractedPatients([]);
+      toast.success("Immagine selezionata. Scrivi il tipo di paziente (es. 'aggiungi come PICC') o clicca 'Estrai' per iniziare.");
+    }
+  };
+
+  const extractPatientsFromImage = async (tipoDefault = "PICC") => {
+    if (!pendingImage) {
+      toast.error("Prima seleziona un'immagine");
+      return;
+    }
+
+    setIsExtracting(true);
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', pendingImage);
+      formData.append('ambulatorio', ambulatorio);
+      formData.append('tipo_default', tipoDefault);
+      
+      const response = await apiClient.post("/ai/extract-from-image", formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      
+      if (response.data.patients && response.data.patients.length > 0) {
+        setExtractedPatients(response.data.patients);
+        setMessages(prev => [...prev, {
+          role: "assistant",
+          content: `📷 **Estratti ${response.data.count} pazienti dall'immagine:**\n\n${response.data.patients.map(p => `• ${p.cognome} ${p.nome}`).join('\n')}\n\n✅ Scrivi "**conferma**" per aggiungerli come ${tipoDefault}, oppure "**annulla**" per cancellare.`,
+          extractedPatients: response.data.patients,
+          tipoDefault: tipoDefault
+        }]);
+      } else {
+        toast.warning("Nessun nome trovato nell'immagine");
+        setMessages(prev => [...prev, {
+          role: "assistant",
+          content: "❌ Non sono riuscito a identificare nomi di pazienti nell'immagine. Prova con un'immagine più chiara o scrivi i nomi manualmente."
+        }]);
+      }
+    } catch (error) {
+      console.error("Extraction error:", error);
+      toast.error("Errore nell'estrazione");
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: "❌ Errore nell'estrazione dei nomi dall'immagine. Riprova."
+      }]);
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+  const confirmExtractedPatients = async (patients, tipo) => {
+    try {
+      const response = await apiClient.post("/patients/batch", {
+        patients: patients.map(p => ({
+          ...p,
+          ambulatorio,
+          tipo: p.tipo || tipo
+        }))
+      });
+      
+      if (response.data.created > 0) {
+        toast.success(`${response.data.created} pazienti creati!`);
+        setMessages(prev => [...prev, {
+          role: "assistant",
+          content: `✅ **Creati ${response.data.created} pazienti!**\n\n${patients.map(p => `• ${p.cognome} ${p.nome} (${p.tipo || tipo})`).join('\n')}`
+        }]);
+      }
+      if (response.data.errors > 0) {
+        toast.warning(`${response.data.errors} pazienti non creati`);
+      }
+      
+      setExtractedPatients([]);
+      setPendingImage(null);
+    } catch (error) {
+      toast.error("Errore nella creazione dei pazienti");
+    }
+  };
+
+  const clearPendingImage = () => {
+    setPendingImage(null);
+    setExtractedPatients([]);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const sendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
 
     const userMessage = inputValue.trim();
     setInputValue("");
     setMessages(prev => [...prev, { role: "user", content: userMessage }]);
+    
+    // Check if user is confirming extracted patients
+    const lowerMsg = userMessage.toLowerCase();
+    if (extractedPatients.length > 0) {
+      if (lowerMsg.includes("conferma") || lowerMsg.includes("sì") || lowerMsg.includes("si") || lowerMsg.includes("ok")) {
+        // Get tipo from last assistant message or default
+        const lastAssistantMsg = messages.filter(m => m.role === "assistant" && m.tipoDefault).pop();
+        const tipo = lastAssistantMsg?.tipoDefault || "PICC";
+        await confirmExtractedPatients(extractedPatients, tipo);
+        return;
+      } else if (lowerMsg.includes("annulla") || lowerMsg.includes("no")) {
+        setExtractedPatients([]);
+        setPendingImage(null);
+        setMessages(prev => [...prev, { role: "assistant", content: "❌ Operazione annullata. I pazienti non sono stati aggiunti." }]);
+        return;
+      }
+    }
+    
+    // Check if user wants to extract from pending image with specific type
+    if (pendingImage && (lowerMsg.includes("picc") || lowerMsg.includes("med") || lowerMsg.includes("estrai") || lowerMsg.includes("aggiungi"))) {
+      let tipo = "PICC";
+      if (lowerMsg.includes("med") && !lowerMsg.includes("picc")) {
+        tipo = "MED";
+      } else if (lowerMsg.includes("picc") && lowerMsg.includes("med")) {
+        tipo = "PICC_MED";
+      }
+      await extractPatientsFromImage(tipo);
+      return;
+    }
+    
     setIsLoading(true);
 
     try {
@@ -494,10 +628,11 @@ export default function AIAssistant() {
                     <p className="text-xs text-gray-500 mb-3">Gestisco pazienti, appuntamenti, statistiche e PDF</p>
                     <div className="space-y-1.5 text-xs text-gray-400 text-left">
                       <p>💡 "Appuntamento per Rossi alle 15 di domani"</p>
+                      <p>💡 "Crea pazienti: Rossi Mario PICC, Bianchi Luigi MED"</p>
+                      <p>💡 "Sospendi Rossi, Bianchi e Verdi"</p>
+                      <p>💡 "Dimetti tutti: Rossi, Bianchi, Neri"</p>
+                      <p>📷 "Carica foto con nomi e scrivi 'aggiungi come PICC'"</p>
                       <p>💡 "Quanti PICC ho impiantato a maggio?"</p>
-                      <p>💡 "Sospendi il paziente Bianchi"</p>
-                      <p>💡 "Stampa cartella di Rossi in PDF"</p>
-                      <p>💡 "Confronta statistiche 2025 vs 2026"</p>
                     </div>
                   </div>
                 ) : (
@@ -564,7 +699,79 @@ export default function AIAssistant() {
 
               {/* Input */}
               <div className="p-3 border-t bg-gray-50">
+                {/* Pending Image Preview */}
+                {pendingImage && (
+                  <div className="mb-2 p-2 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-2">
+                    <Image className="w-4 h-4 text-blue-600" />
+                    <span className="text-xs text-blue-700 flex-1 truncate">{pendingImage.name}</span>
+                    {isExtracting ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => extractPatientsFromImage("PICC")}
+                          className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                        >
+                          Estrai
+                        </button>
+                        <button
+                          onClick={clearPendingImage}
+                          className="text-red-500 hover:text-red-700"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+                
+                {/* Extracted Patients Confirmation */}
+                {extractedPatients.length > 0 && (
+                  <div className="mb-2 p-2 bg-green-50 border border-green-200 rounded-lg">
+                    <div className="text-xs text-green-700 mb-1">
+                      <Check className="w-3 h-3 inline mr-1" />
+                      {extractedPatients.length} pazienti estratti
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => confirmExtractedPatients(extractedPatients, "PICC")}
+                        className="text-xs px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700"
+                      >
+                        Conferma PICC
+                      </button>
+                      <button
+                        onClick={() => confirmExtractedPatients(extractedPatients, "MED")}
+                        className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                      >
+                        Conferma MED
+                      </button>
+                      <button
+                        onClick={clearPendingImage}
+                        className="text-xs px-2 py-1 text-red-600 hover:text-red-700"
+                      >
+                        Annulla
+                      </button>
+                    </div>
+                  </div>
+                )}
+                
                 <div className="flex items-center gap-2">
+                  {/* Image Upload Button */}
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    accept="image/*"
+                    onChange={handleImageSelect}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`p-2.5 rounded-full transition-colors ${pendingImage ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
+                    title="Carica foto con nomi pazienti"
+                    disabled={isExtracting}
+                  >
+                    <Image className="w-4 h-4" />
+                  </button>
                   <button
                     onClick={toggleListening}
                     className={`p-2.5 rounded-full transition-colors ${isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
@@ -577,14 +784,14 @@ export default function AIAssistant() {
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder={isListening ? "Sto ascoltando..." : "Scrivi un messaggio..."}
+                    placeholder={isListening ? "Sto ascoltando..." : pendingImage ? "Scrivi 'aggiungi come PICC' o 'aggiungi come MED'..." : "Scrivi un messaggio..."}
                     className="flex-1 rounded-full border-gray-200 text-sm"
-                    disabled={isLoading}
+                    disabled={isLoading || isExtracting}
                     data-testid="ai-chat-input"
                   />
                   <Button
                     onClick={sendMessage}
-                    disabled={!inputValue.trim() || isLoading}
+                    disabled={!inputValue.trim() || isLoading || isExtracting}
                     className="rounded-full w-10 h-10 p-0 bg-blue-600 hover:bg-blue-700"
                     data-testid="ai-send-btn"
                   >

@@ -46,6 +46,9 @@ const PRESTAZIONI_LABELS = {
   fasciatura_semplice: { label: "Fasciatura semplice", icon: CircleDot },
   iniezione_terapeutica: { label: "Iniezione terapeutica", icon: Syringe },
   catetere_vescicale: { label: "Catetere vescicale", icon: Droplets },
+  espianto_picc: { label: "Espianto PICC", icon: CircleDot, isEspianto: true },
+  espianto_picc_port: { label: "Espianto PICC Port", icon: CircleDot, isEspianto: true },
+  espianto_midline: { label: "Espianto Midline", icon: CircleDot, isEspianto: true },
 };
 
 const YEARS = [2024, 2025, 2026, 2027, 2028, 2029, 2030];
@@ -166,8 +169,10 @@ export default function StatistichePage() {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
   const [implantStats, setImplantStats] = useState(null);
+  const [espiantiStats, setEspiantiStats] = useState(null);
   const [compareStats, setCompareStats] = useState(null);
   const [compareImplantStats, setCompareImplantStats] = useState(null);
+  const [compareEspiantiStats, setCompareEspiantiStats] = useState(null);
   const [activeTab, setActiveTab] = useState(
     ambulatorio === "villa_ginestre" ? "PICC" : "MED"
   );
@@ -205,6 +210,11 @@ export default function StatistichePage() {
         if (mese !== null) params.mese = mese;
         const response = await apiClient.get("/statistics/implants", { params });
         setImplantStats(response.data);
+        
+        // Fetch espianti statistics
+        const espiantiResponse = await apiClient.get("/statistics/espianti", { params });
+        setEspiantiStats(espiantiResponse.data);
+        
         setStats(null);
 
         // Fetch compare period if enabled
@@ -213,9 +223,33 @@ export default function StatistichePage() {
           if (compareMese !== null) compareParams.mese = compareMese;
           const compareResponse = await apiClient.get("/statistics/implants", { params: compareParams });
           setCompareImplantStats(compareResponse.data);
+          
+          const compareEspiantiResponse = await apiClient.get("/statistics/espianti", { params: compareParams });
+          setCompareEspiantiStats(compareEspiantiResponse.data);
         } else {
           setCompareImplantStats(null);
+          setCompareEspiantiStats(null);
         }
+      } else if (activeTab === "ESPIANTI") {
+        // Fetch espianti statistics for primary period
+        const params = { ambulatorio, anno };
+        if (mese !== null) params.mese = mese;
+        const response = await apiClient.get("/statistics/espianti", { params });
+        setEspiantiStats(response.data);
+        setStats(null);
+        setImplantStats(null);
+
+        // Fetch compare period if enabled
+        if (compareMode) {
+          const compareParams = { ambulatorio, anno: compareAnno };
+          if (compareMese !== null) compareParams.mese = compareMese;
+          const compareResponse = await apiClient.get("/statistics/espianti", { params: compareParams });
+          setCompareEspiantiStats(compareResponse.data);
+        } else {
+          setCompareEspiantiStats(null);
+        }
+        setCompareImplantStats(null);
+        setCompareStats(null);
       } else {
         // Fetch regular statistics for primary period
         const params = {
@@ -228,6 +262,7 @@ export default function StatistichePage() {
         const response = await apiClient.get("/statistics", { params });
         setStats(response.data);
         setImplantStats(null);
+        setEspiantiStats(null);
 
         // Fetch compare period if enabled
         if (compareMode) {
@@ -243,6 +278,7 @@ export default function StatistichePage() {
           setCompareStats(null);
         }
         setCompareImplantStats(null);
+        setCompareEspiantiStats(null);
       }
     } catch (error) {
       toast.error("Errore nel caricamento delle statistiche");
@@ -651,7 +687,10 @@ export default function StatistichePage() {
             Statistiche PICC
           </TabsTrigger>
           <TabsTrigger value="IMPIANTI" data-testid="stats-tab-impianti">
-            Statistiche Impianti
+            Impianti
+          </TabsTrigger>
+          <TabsTrigger value="ESPIANTI" data-testid="stats-tab-espianti">
+            Espianti
           </TabsTrigger>
         </TabsList>
       </Tabs>
@@ -744,8 +783,83 @@ export default function StatistichePage() {
         </>
       )}
 
+      {/* ESPIANTI STATISTICS (separate tab) */}
+      {activeTab === "ESPIANTI" && (
+        <>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
+            <StatCard
+              title="Totale Espianti"
+              value={espiantiStats?.totale_espianti}
+              compareValue={compareEspiantiStats?.totale_espianti}
+              icon={CircleDot}
+              showComparison={compareMode}
+            />
+            {Object.entries(espiantiStats?.per_tipo || {}).map(([tipo, count]) => (
+              <Card key={tipo} className="stat-card">
+                <div className="flex items-start justify-between">
+                  <div className="space-y-1">
+                    <p className="stat-value">{count}</p>
+                    <p className="stat-label">{espiantiStats?.tipo_labels?.[tipo] || tipo}</p>
+                    {compareMode && (
+                      <ComparisonBadge 
+                        current={count} 
+                        compare={compareEspiantiStats?.per_tipo?.[tipo] || 0} 
+                      />
+                    )}
+                  </div>
+                  <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
+                    <CircleDot className="w-5 h-5 text-red-600" />
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+
+          {/* Espianti Types Detail */}
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle className="text-lg">Dettaglio Espianti per Tipo</CardTitle>
+              <CardDescription>
+                Conteggio degli espianti effettuati nel periodo selezionato
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {espiantiStats?.per_tipo && Object.values(espiantiStats.per_tipo).some(v => v > 0) ? (
+                <div className="space-y-4">
+                  {Object.entries(espiantiStats.per_tipo).map(([tipo, count]) => {
+                    const compareVal = compareEspiantiStats?.per_tipo?.[tipo] || 0;
+                    return (
+                      <div
+                        key={tipo}
+                        className="flex items-center justify-between p-4 bg-red-50 rounded-lg border border-red-200"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
+                            <CircleDot className="w-5 h-5 text-red-600" />
+                          </div>
+                          <span className="font-medium">{espiantiStats?.tipo_labels?.[tipo] || tipo}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl font-bold text-red-600">{count}</span>
+                          {compareMode && <ComparisonBadge current={count} compare={compareVal} />}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <CircleDot className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                  <p>Nessun espianto registrato per il periodo selezionato</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
+
       {/* REGULAR STATISTICS (MED/PICC) */}
-      {activeTab !== "IMPIANTI" && (
+      {(activeTab === "MED" || activeTab === "PICC") && (
         <>
           {/* Summary Cards */}
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
