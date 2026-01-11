@@ -2354,13 +2354,58 @@ async def get_ai_response(message: str, session_id: str, ambulatorio: str, user_
         return {"response": f"Mi dispiace, ho avuto un problema: {str(e)}", "action": None}
 
 async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dict:
-    """Execute an action determined by AI"""
+    """Execute an action determined by AI - VERSIONE COMPLETA"""
     action_type = action.get("action")
     params = action.get("params", {})
     
+    # Helper per trovare paziente
+    async def find_patient(patient_name: str):
+        name_lower = patient_name.lower()
+        parts = name_lower.split()
+        query_parts = []
+        for part in parts:
+            if len(part) > 1:
+                query_parts.append({"cognome": {"$regex": part, "$options": "i"}})
+                query_parts.append({"nome": {"$regex": part, "$options": "i"}})
+        
+        if not query_parts:
+            return None
+            
+        return await db.patients.find_one({
+            "ambulatorio": ambulatorio,
+            "$or": query_parts
+        })
+    
+    # Helper per trovare primo slot disponibile
+    async def find_available_slot(data: str, tipo: str, turno: str = "primo_disponibile"):
+        slots_mattina = ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30"]
+        slots_pomeriggio = ["15:00", "15:30", "16:00", "16:30", "17:00", "17:30"]
+        
+        if turno == "mattina":
+            slots = slots_mattina
+        elif turno == "pomeriggio":
+            slots = slots_pomeriggio
+        else:
+            slots = slots_mattina + slots_pomeriggio
+        
+        for slot in slots:
+            count = await db.appointments.count_documents({
+                "ambulatorio": ambulatorio,
+                "data": data,
+                "ora": slot,
+                "tipo": tipo
+            })
+            if count < 2:
+                return slot
+        return None
+    
+    # Nomi mesi per messaggi
+    MESI = ["", "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", 
+            "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"]
+    
     try:
+        # ==================== CREATE PATIENT ====================
         if action_type == "create_patient":
-            # Create patient
             patient_data = {
                 "id": str(uuid.uuid4()),
                 "nome": params.get("nome", ""),
@@ -2372,8 +2417,10 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }
             await db.patients.insert_one(patient_data)
-            return {"success": True, "patient_id": patient_data["id"], "message": f"Paziente {params.get('cognome')} {params.get('nome')} creato con successo!"}
+            return {"success": True, "patient_id": patient_data["id"], 
+                    "message": f"✅ Paziente **{params.get('cognome')} {params.get('nome')}** creato con successo come {params.get('tipo', 'PICC')}!"}
         
+        # ==================== SEARCH PATIENT ====================
         elif action_type == "search_patient":
             query = params.get("query", "").lower()
             patients = await db.patients.find({
@@ -2383,53 +2430,60 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
                     {"cognome": {"$regex": query, "$options": "i"}}
                 ]
             }, {"_id": 0}).to_list(10)
-            return {"success": True, "patients": patients}
+            
+            if patients:
+                names = [f"• {p['cognome']} {p['nome']} ({p['tipo']})" for p in patients]
+                return {"success": True, "patients": patients, 
+                        "message": f"🔍 Ho trovato {len(patients)} paziente/i:\n" + "\n".join(names)}
+            return {"success": False, "message": f"❌ Nessun paziente trovato con '{query}'"}
         
+        # ==================== CREATE APPOINTMENT ====================
         elif action_type == "create_appointment":
-            # Find patient
-            patient_name = params.get("patient_name", "").lower()
-            parts = patient_name.split()
-            patient = await db.patients.find_one({
-                "ambulatorio": ambulatorio,
-                "$or": [
-                    {"cognome": {"$regex": parts[0] if parts else "", "$options": "i"}},
-                    {"nome": {"$regex": parts[-1] if parts else "", "$options": "i"}}
-                ]
-            })
+            patient_name = params.get("patient_name", "")
+            patient = await find_patient(patient_name)
             
             if not patient:
-                return {"success": False, "message": f"Paziente '{patient_name}' non trovato. Vuoi crearlo?"}
+                return {"success": False, "message": f"❌ Paziente '{patient_name}' non trovato. Vuoi che lo crei?"}
             
             data = params.get("data")
             ora = params.get("ora")
+            turno = params.get("turno", "primo_disponibile")
             tipo = params.get("tipo", patient.get("tipo", "PICC"))
+            if tipo == "PICC_MED":
+                tipo = "PICC"
             
-            # Check slot availability
-            existing = await db.appointments.count_documents({
-                "ambulatorio": ambulatorio,
-                "data": data,
-                "ora": ora,
-                "tipo": tipo
-            })
+            # Se non è specificato un orario o c'è un turno, cerca slot disponibile
+            if not ora or turno in ["primo_disponibile", "mattina", "pomeriggio"]:
+                ora = await find_available_slot(data, tipo, turno)
+                if not ora:
+                    turno_msg = f" del {turno}" if turno != "primo_disponibile" else ""
+                    return {"success": False, "message": f"❌ Nessun orario disponibile{turno_msg} per il {data}. Vuoi provare un altro giorno?"}
+            else:
+                # Verifica disponibilità slot specifico
+                existing = await db.appointments.count_documents({
+                    "ambulatorio": ambulatorio,
+                    "data": data,
+                    "ora": ora,
+                    "tipo": tipo
+                })
+                
+                if existing >= 2:
+                    # Trova prossimo slot disponibile
+                    next_slot = await find_available_slot(data, tipo, turno if turno != "primo_disponibile" else "primo_disponibile")
+                    if next_slot:
+                        return {"success": False, 
+                                "message": f"⚠️ Orario **{ora}** già occupato (2 pazienti).\n\n📅 Primo orario disponibile: **{next_slot}**\n\nVuoi confermare l'appuntamento alle {next_slot}?",
+                                "suggested_time": next_slot,
+                                "suggested_data": data}
+                    return {"success": False, "message": f"❌ Nessun orario disponibile per il {data}"}
             
-            if existing >= 2:
-                # Find next available slot
-                slots = ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30"]
-                for slot in slots:
-                    count = await db.appointments.count_documents({
-                        "ambulatorio": ambulatorio,
-                        "data": data,
-                        "ora": slot,
-                        "tipo": tipo
-                    })
-                    if count < 2:
-                        return {"success": False, "message": f"Orario {ora} non disponibile. Primo orario disponibile: {slot}. Confermare?", "suggested_time": slot}
-                return {"success": False, "message": f"Nessun orario disponibile per il {data}"}
-            
-            # Create appointment
+            # Crea appuntamento
             prestazioni = params.get("prestazioni", [])
-            if not prestazioni and tipo in ["PICC", "PICC_MED"]:
-                prestazioni = ["medicazione_semplice", "irrigazione_catetere"]
+            if not prestazioni:
+                if tipo == "PICC":
+                    prestazioni = ["medicazione_semplice", "irrigazione_catetere"]
+                elif tipo == "MED":
+                    prestazioni = ["medicazione_semplice"]
             
             appointment = {
                 "id": str(uuid.uuid4()),
@@ -2443,10 +2497,42 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
             await db.appointments.insert_one(appointment)
-            return {"success": True, "message": f"Appuntamento creato per {patient['cognome']} {patient['nome']} il {data} alle {ora}"}
+            
+            return {"success": True, 
+                    "message": f"✅ Appuntamento creato!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📅 {data} alle **{ora}**\n🏷️ Tipo: {tipo}"}
         
-        elif action_type == "get_statistics":
-            tipo = params.get("tipo")
+        # ==================== DELETE APPOINTMENT ====================
+        elif action_type == "delete_appointment":
+            patient_name = params.get("patient_name", "")
+            patient = await find_patient(patient_name)
+            
+            if not patient:
+                return {"success": False, "message": f"❌ Paziente '{patient_name}' non trovato"}
+            
+            data = params.get("data")
+            ora = params.get("ora")
+            
+            query = {
+                "ambulatorio": ambulatorio,
+                "patient_id": patient["id"],
+                "data": data
+            }
+            if ora:
+                query["ora"] = ora
+            
+            # Trova l'appuntamento
+            appointment = await db.appointments.find_one(query)
+            if not appointment:
+                return {"success": False, "message": f"❌ Nessun appuntamento trovato per {patient['cognome']} {patient['nome']} il {data}"}
+            
+            # Elimina
+            await db.appointments.delete_one({"id": appointment["id"]})
+            return {"success": True, 
+                    "message": f"✅ Appuntamento eliminato!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📅 {data} alle {appointment.get('ora', 'N/A')}"}
+        
+        # ==================== GET IMPLANT STATISTICS ====================
+        elif action_type == "get_implant_statistics":
+            tipo_impianto = params.get("tipo_impianto", "tutti")
             anno = params.get("anno", datetime.now().year)
             mese = params.get("mese")
             
@@ -2454,88 +2540,237 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             if mese:
                 start_date = f"{anno}-{mese:02d}-01"
                 end_date = f"{anno}-{mese + 1:02d}-01" if mese < 12 else f"{anno + 1}-01-01"
+                periodo = f"{MESI[mese]} {anno}"
             else:
                 start_date = f"{anno}-01-01"
                 end_date = f"{anno + 1}-01-01"
+                periodo = f"anno {anno}"
             
-            if tipo == "IMPIANTI":
-                schede = await db.schede_impianto_picc.find({
-                    "ambulatorio": ambulatorio,
-                    "data_impianto": {"$gte": start_date, "$lt": end_date}
-                }).to_list(10000)
-                return {"success": True, "totale_impianti": len(schede), "periodo": f"{mese}/{anno}" if mese else f"Anno {anno}"}
+            query = {
+                "ambulatorio": ambulatorio,
+                "data_impianto": {"$gte": start_date, "$lt": end_date}
+            }
+            
+            if tipo_impianto and tipo_impianto != "tutti":
+                query["tipo_catetere"] = tipo_impianto
+            
+            schede = await db.schede_impianto_picc.find(query, {"_id": 0}).to_list(10000)
+            
+            # Conta per tipo
+            tipo_counts = {}
+            for s in schede:
+                t = s.get("tipo_catetere", "non_specificato")
+                tipo_counts[t] = tipo_counts.get(t, 0) + 1
+            
+            tipo_labels = {
+                "picc": "PICC",
+                "midline": "Midline", 
+                "picc_port": "PICC Port",
+                "port_a_cath": "Port-a-cath",
+            }
+            
+            if tipo_impianto and tipo_impianto != "tutti":
+                count = tipo_counts.get(tipo_impianto, 0)
+                label = tipo_labels.get(tipo_impianto, tipo_impianto.upper())
+                msg = f"📊 **Statistiche Impianti - {periodo}**\n\n"
+                msg += f"🔹 **{label}**: {count} impianti\n\n"
+                msg += "Vuoi che ti scarichi il report PDF del mese?"
             else:
-                query = {
-                    "ambulatorio": ambulatorio,
-                    "data": {"$gte": start_date, "$lt": end_date},
-                    "stato": {"$ne": "non_presentato"}
-                }
-                if tipo:
-                    query["tipo"] = tipo
-                
-                appointments = await db.appointments.find(query).to_list(10000)
-                
-                prestazioni_count = {}
-                for app in appointments:
-                    for prest in app.get("prestazioni", []):
-                        prestazioni_count[prest] = prestazioni_count.get(prest, 0) + 1
-                
-                periodo = f"{mese}/{anno}" if mese else f"Anno {anno}"
-                return {
-                    "success": True,
-                    "totale_accessi": len(appointments),
-                    "pazienti_unici": len(set(a["patient_id"] for a in appointments)),
-                    "prestazioni": prestazioni_count,
-                    "periodo": periodo
-                }
-        
-        elif action_type == "open_patient":
-            patient_name = params.get("patient_name", "").lower()
-            parts = patient_name.split()
-            patient = await db.patients.find_one({
-                "ambulatorio": ambulatorio,
-                "$or": [
-                    {"cognome": {"$regex": parts[0] if parts else "", "$options": "i"}},
-                    {"nome": {"$regex": parts[-1] if parts else "", "$options": "i"}}
-                ]
-            }, {"_id": 0})
+                msg = f"📊 **Statistiche Impianti - {periodo}**\n\n"
+                msg += f"📈 Totale: **{len(schede)}** impianti\n\n"
+                for t, c in tipo_counts.items():
+                    label = tipo_labels.get(t, t)
+                    msg += f"🔹 {label}: {c}\n"
+                msg += "\nVuoi che ti scarichi il report PDF?"
             
-            if patient:
-                return {"success": True, "patient": patient, "navigate_to": f"/pazienti/{patient['id']}"}
-            return {"success": False, "message": f"Paziente '{patient_name}' non trovato"}
+            return {"success": True, "totale": len(schede), "per_tipo": tipo_counts, 
+                    "periodo": periodo, "message": msg, "offer_pdf": True}
         
-        elif action_type == "create_scheda_impianto":
-            patient_name = params.get("patient_name", "").lower()
-            parts = patient_name.split()
-            patient = await db.patients.find_one({
+        # ==================== GET PRESTAZIONI STATISTICS ====================
+        elif action_type == "get_prestazioni_statistics":
+            tipo = params.get("tipo")
+            anno = params.get("anno", datetime.now().year)
+            mese = params.get("mese")
+            
+            if mese:
+                start_date = f"{anno}-{mese:02d}-01"
+                end_date = f"{anno}-{mese + 1:02d}-01" if mese < 12 else f"{anno + 1}-01-01"
+                periodo = f"{MESI[mese]} {anno}"
+            else:
+                start_date = f"{anno}-01-01"
+                end_date = f"{anno + 1}-01-01"
+                periodo = f"anno {anno}"
+            
+            query = {
                 "ambulatorio": ambulatorio,
-                "$or": [
-                    {"cognome": {"$regex": parts[0] if parts else "", "$options": "i"}},
-                    {"nome": {"$regex": parts[-1] if parts else "", "$options": "i"}}
-                ]
-            })
+                "data": {"$gte": start_date, "$lt": end_date},
+                "stato": {"$ne": "non_presentato"}
+            }
+            if tipo and tipo != "tutti":
+                query["tipo"] = tipo
+            
+            appointments = await db.appointments.find(query).to_list(10000)
+            
+            prestazioni_count = {}
+            prestazioni_labels = {
+                "medicazione_semplice": "Medicazione semplice",
+                "irrigazione_catetere": "Irrigazione catetere",
+                "fasciatura_semplice": "Fasciatura semplice",
+                "iniezione_terapeutica": "Iniezione terapeutica",
+                "catetere_vescicale": "Catetere vescicale"
+            }
+            
+            for app in appointments:
+                for prest in app.get("prestazioni", []):
+                    prestazioni_count[prest] = prestazioni_count.get(prest, 0) + 1
+            
+            msg = f"📊 **Statistiche Prestazioni - {periodo}**\n\n"
+            msg += f"📈 Totale accessi: **{len(appointments)}**\n"
+            msg += f"👥 Pazienti unici: **{len(set(a['patient_id'] for a in appointments))}**\n\n"
+            
+            if prestazioni_count:
+                msg += "**Dettaglio prestazioni:**\n"
+                for p, c in prestazioni_count.items():
+                    label = prestazioni_labels.get(p, p)
+                    msg += f"🔹 {label}: {c}\n"
+            else:
+                msg += "Nessuna prestazione registrata.\n"
+            
+            msg += "\nVuoi che ti scarichi il report PDF?"
+            
+            return {"success": True, "totale_accessi": len(appointments),
+                    "prestazioni": prestazioni_count, "periodo": periodo, 
+                    "message": msg, "offer_pdf": True}
+        
+        # ==================== COPY SCHEDA MED ====================
+        elif action_type == "copy_scheda_med":
+            patient_name = params.get("patient_name", "")
+            patient = await find_patient(patient_name)
             
             if not patient:
-                return {"success": False, "message": f"Paziente '{patient_name}' non trovato"}
+                return {"success": False, "message": f"❌ Paziente '{patient_name}' non trovato"}
+            
+            # Trova ultima scheda MED
+            last_scheda = await db.schede_medicazione_med.find_one(
+                {"patient_id": patient["id"], "ambulatorio": ambulatorio},
+                sort=[("created_at", -1)]
+            )
+            
+            if not last_scheda:
+                return {"success": False, "message": f"❌ Nessuna scheda MED precedente trovata per {patient['cognome']} {patient['nome']}"}
+            
+            # Copia con nuova data
+            nuova_data = params.get("nuova_data", datetime.now().strftime("%Y-%m-%d"))
+            new_scheda = {k: v for k, v in last_scheda.items() if k not in ["_id", "id", "created_at", "updated_at"]}
+            new_scheda["id"] = str(uuid.uuid4())
+            new_scheda["data_compilazione"] = nuova_data
+            new_scheda["created_at"] = datetime.now(timezone.utc).isoformat()
+            new_scheda["updated_at"] = datetime.now(timezone.utc).isoformat()
+            
+            await db.schede_medicazione_med.insert_one(new_scheda)
+            
+            return {"success": True, 
+                    "message": f"✅ Scheda MED copiata!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📅 Nuova data: {nuova_data}\n\nHo copiato tutti i dati dalla scheda precedente.",
+                    "navigate_to": f"/pazienti/{patient['id']}"}
+        
+        # ==================== COPY SCHEDA GESTIONE PICC ====================
+        elif action_type == "copy_scheda_gestione_picc":
+            patient_name = params.get("patient_name", "")
+            patient = await find_patient(patient_name)
+            
+            if not patient:
+                return {"success": False, "message": f"❌ Paziente '{patient_name}' non trovato"}
+            
+            nuova_data = params.get("nuova_data", datetime.now().strftime("%Y-%m-%d"))
+            
+            # Trova ultima scheda gestione PICC
+            last_scheda = await db.schede_gestione_picc.find_one(
+                {"patient_id": patient["id"], "ambulatorio": ambulatorio},
+                sort=[("created_at", -1)]
+            )
+            
+            if not last_scheda:
+                return {"success": False, "message": f"❌ Nessuna scheda gestione PICC precedente trovata per {patient['cognome']} {patient['nome']}"}
+            
+            # Trova l'ultimo giorno compilato nella scheda
+            giorni = last_scheda.get("giorni", {})
+            if not giorni:
+                return {"success": False, "message": "❌ La scheda precedente non ha dati da copiare"}
+            
+            last_day_key = sorted(giorni.keys())[-1]
+            last_day_data = giorni[last_day_key]
+            
+            # Aggiorna la data nel nuovo giorno
+            day = int(nuova_data.split("-")[2])
+            month = int(nuova_data.split("-")[1])
+            new_day_data = {**last_day_data, "data_giorno_mese": f"{day}/{month}"}
+            
+            # Aggiungi il nuovo giorno alla scheda
+            await db.schede_gestione_picc.update_one(
+                {"id": last_scheda["id"]},
+                {"$set": {f"giorni.{nuova_data}": new_day_data, "updated_at": datetime.now(timezone.utc).isoformat()}}
+            )
+            
+            return {"success": True,
+                    "message": f"✅ Medicazione PICC copiata!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📅 Nuova data: {nuova_data}\n\nHo copiato i dati dalla medicazione precedente ({last_day_key}).",
+                    "navigate_to": f"/pazienti/{patient['id']}"}
+        
+        # ==================== OPEN PATIENT ====================
+        elif action_type == "open_patient":
+            patient_name = params.get("patient_name", "")
+            patient = await find_patient(patient_name)
+            
+            if patient:
+                return {"success": True, "patient": patient, 
+                        "navigate_to": f"/pazienti/{patient['id']}",
+                        "message": f"📂 Apro la cartella di **{patient['cognome']} {patient['nome']}**..."}
+            return {"success": False, "message": f"❌ Paziente '{patient_name}' non trovato"}
+        
+        # ==================== CREATE SCHEDA IMPIANTO ====================
+        elif action_type == "create_scheda_impianto":
+            patient_name = params.get("patient_name", "")
+            patient = await find_patient(patient_name)
+            
+            if not patient:
+                return {"success": False, "message": f"❌ Paziente '{patient_name}' non trovato"}
+            
+            tipo_catetere = params.get("tipo_catetere", "picc")
+            data_impianto = params.get("data_impianto", datetime.now().strftime("%Y-%m-%d"))
             
             scheda = {
                 "id": str(uuid.uuid4()),
                 "patient_id": patient["id"],
                 "ambulatorio": ambulatorio,
                 "scheda_type": "semplificata",
-                "tipo_catetere": params.get("tipo_catetere", "picc"),
-                "data_impianto": params.get("data_impianto", datetime.now().strftime("%Y-%m-%d")),
+                "tipo_catetere": tipo_catetere,
+                "data_impianto": data_impianto,
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }
             await db.schede_impianto_picc.insert_one(scheda)
-            return {"success": True, "message": f"Scheda impianto creata per {patient['cognome']} {patient['nome']}"}
+            
+            tipo_labels = {"picc": "PICC", "midline": "Midline", "picc_port": "PICC Port", "port_a_cath": "Port-a-cath"}
+            label = tipo_labels.get(tipo_catetere, tipo_catetere.upper())
+            
+            return {"success": True, 
+                    "message": f"✅ Scheda impianto creata!\n\n👤 **{patient['cognome']} {patient['nome']}**\n🔹 Tipo: {label}\n📅 Data: {data_impianto}",
+                    "navigate_to": f"/pazienti/{patient['id']}"}
         
-        return {"success": False, "message": "Azione non riconosciuta"}
+        # ==================== GET STATISTICS (legacy) ====================
+        elif action_type == "get_statistics":
+            # Redirect to appropriate new action
+            tipo = params.get("tipo")
+            if tipo == "IMPIANTI":
+                params["tipo_impianto"] = "tutti"
+                return await execute_ai_action({"action": "get_implant_statistics", "params": params}, ambulatorio, user_id)
+            else:
+                return await execute_ai_action({"action": "get_prestazioni_statistics", "params": params}, ambulatorio, user_id)
+        
+        return {"success": False, "message": "❌ Azione non riconosciuta. Prova a riformulare la richiesta."}
         
     except Exception as e:
         logger.error(f"Action error: {str(e)}")
-        return {"success": False, "message": f"Errore nell'esecuzione: {str(e)}"}
+        return {"success": False, "message": f"❌ Errore nell'esecuzione: {str(e)}"}
 
 @api_router.post("/ai/chat")
 async def ai_chat(
