@@ -2636,6 +2636,7 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             tipo = params.get("tipo")
             anno = params.get("anno", datetime.now().year)
             mese = params.get("mese")
+            generate_pdf = params.get("generate_pdf", False)
             
             if mese:
                 start_date = f"{anno}-{mese:02d}-01"
@@ -2681,11 +2682,20 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             else:
                 msg += "Nessuna prestazione registrata.\n"
             
-            msg += "\nVuoi che ti scarichi il report PDF?"
+            if generate_pdf:
+                msg += "\n\n📥 Clicca 'Scarica PDF' per il report."
+            else:
+                msg += "\nVuoi che generi il report PDF?"
             
-            return {"success": True, "totale_accessi": len(appointments),
+            result = {"success": True, "totale_accessi": len(appointments),
                     "prestazioni": prestazioni_count, "periodo": periodo, 
                     "message": msg, "offer_pdf": True}
+            
+            if generate_pdf:
+                result["pdf_endpoint"] = f"/statistics/pdf?ambulatorio={ambulatorio}&anno={anno}&mese={mese or ''}&tipo={tipo or 'tutti'}"
+                result["filename"] = f"prestazioni_{periodo.replace(' ', '_')}.pdf"
+            
+            return result
         
         # ==================== COPY SCHEDA MED ====================
         elif action_type == "copy_scheda_med":
