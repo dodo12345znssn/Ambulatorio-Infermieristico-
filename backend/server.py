@@ -2247,6 +2247,142 @@ class AIChatResponse(BaseModel):
     session_id: str
     action_performed: Optional[dict] = None
 
+# ============== SISTEMA UNDO PER IA ==============
+class UndoAction(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    ambulatorio: str
+    action_type: str
+    action_description: str
+    undo_data: dict  # Dati necessari per annullare l'azione
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+async def save_undo_action(user_id: str, ambulatorio: str, action_type: str, description: str, undo_data: dict):
+    """Salva un'azione per poterla annullare successivamente"""
+    action = {
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "ambulatorio": ambulatorio,
+        "action_type": action_type,
+        "action_description": description,
+        "undo_data": undo_data,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    await db.ai_undo_history.insert_one(action)
+    
+    # Mantieni solo le ultime 10 azioni per utente/ambulatorio
+    actions = await db.ai_undo_history.find(
+        {"user_id": user_id, "ambulatorio": ambulatorio}
+    ).sort("timestamp", -1).to_list(100)
+    
+    if len(actions) > 10:
+        # Elimina le azioni più vecchie oltre le 10
+        old_ids = [a["id"] for a in actions[10:]]
+        await db.ai_undo_history.delete_many({"id": {"$in": old_ids}})
+    
+    return action["id"]
+
+async def get_undo_actions(user_id: str, ambulatorio: str, limit: int = 10):
+    """Ottiene le ultime azioni annullabili"""
+    return await db.ai_undo_history.find(
+        {"user_id": user_id, "ambulatorio": ambulatorio},
+        {"_id": 0}
+    ).sort("timestamp", -1).to_list(limit)
+
+async def execute_undo(action: dict, ambulatorio: str) -> dict:
+    """Esegue l'annullamento di un'azione"""
+    action_type = action["action_type"]
+    undo_data = action["undo_data"]
+    
+    try:
+        if action_type == "create_patient":
+            # Annulla creazione = elimina paziente
+            patient_id = undo_data.get("patient_id")
+            await db.patients.delete_one({"id": patient_id})
+            return {"success": True, "message": f"↩️ Annullato: Paziente eliminato"}
+        
+        elif action_type == "delete_patient":
+            # Annulla eliminazione = ricrea paziente e dati
+            patient_data = undo_data.get("patient_data")
+            appointments = undo_data.get("appointments", [])
+            schede_impianto = undo_data.get("schede_impianto", [])
+            schede_gestione = undo_data.get("schede_gestione", [])
+            schede_med = undo_data.get("schede_med", [])
+            prescrizioni = undo_data.get("prescrizioni", [])
+            
+            if patient_data:
+                await db.patients.insert_one(patient_data)
+            for apt in appointments:
+                await db.appointments.insert_one(apt)
+            for s in schede_impianto:
+                await db.schede_impianto_picc.insert_one(s)
+            for s in schede_gestione:
+                await db.schede_gestione_picc.insert_one(s)
+            for s in schede_med:
+                await db.schede_medicazione_med.insert_one(s)
+            for p in prescrizioni:
+                await db.prescrizioni.insert_one(p)
+            
+            nome = f"{patient_data.get('cognome', '')} {patient_data.get('nome', '')}"
+            return {"success": True, "message": f"↩️ Annullato: Paziente **{nome}** ripristinato con tutti i dati"}
+        
+        elif action_type in ["suspend_patient", "resume_patient", "discharge_patient"]:
+            # Annulla cambio stato = ripristina stato precedente
+            patient_id = undo_data.get("patient_id")
+            previous_status = undo_data.get("previous_status")
+            previous_data = undo_data.get("previous_data", {})
+            
+            update_data = {"status": previous_status, "updated_at": datetime.now(timezone.utc).isoformat()}
+            if "data_dimissione" in previous_data:
+                update_data["data_dimissione"] = previous_data["data_dimissione"]
+            
+            await db.patients.update_one({"id": patient_id}, {"$set": update_data})
+            
+            patient = await db.patients.find_one({"id": patient_id})
+            nome = f"{patient.get('cognome', '')} {patient.get('nome', '')}" if patient else "Paziente"
+            return {"success": True, "message": f"↩️ Annullato: **{nome}** tornato a stato '{previous_status}'"}
+        
+        elif action_type == "create_appointment":
+            # Annulla creazione appuntamento = elimina
+            appointment_id = undo_data.get("appointment_id")
+            await db.appointments.delete_one({"id": appointment_id})
+            return {"success": True, "message": f"↩️ Annullato: Appuntamento eliminato"}
+        
+        elif action_type == "delete_appointment":
+            # Annulla eliminazione appuntamento = ricrea
+            appointment_data = undo_data.get("appointment_data")
+            if appointment_data:
+                await db.appointments.insert_one(appointment_data)
+            return {"success": True, "message": f"↩️ Annullato: Appuntamento ripristinato"}
+        
+        elif action_type == "create_scheda_impianto":
+            # Annulla creazione scheda = elimina
+            scheda_id = undo_data.get("scheda_id")
+            await db.schede_impianto_picc.delete_one({"id": scheda_id})
+            return {"success": True, "message": f"↩️ Annullato: Scheda impianto eliminata"}
+        
+        elif action_type == "copy_scheda_med":
+            # Annulla copia scheda MED = elimina la nuova
+            scheda_id = undo_data.get("scheda_id")
+            await db.schede_medicazione_med.delete_one({"id": scheda_id})
+            return {"success": True, "message": f"↩️ Annullato: Scheda MED copiata eliminata"}
+        
+        elif action_type == "copy_scheda_gestione_picc":
+            # Annulla copia giorno PICC = rimuovi il giorno aggiunto
+            scheda_id = undo_data.get("scheda_id")
+            day_key = undo_data.get("day_key")
+            await db.schede_gestione_picc.update_one(
+                {"id": scheda_id},
+                {"$unset": {f"giorni.{day_key}": ""}}
+            )
+            return {"success": True, "message": f"↩️ Annullato: Giorno {day_key} rimosso dalla scheda"}
+        
+        return {"success": False, "message": "❌ Tipo di azione non supportato per l'annullamento"}
+        
+    except Exception as e:
+        logger.error(f"Undo error: {str(e)}")
+        return {"success": False, "message": f"❌ Errore nell'annullamento: {str(e)}"}
+
 SYSTEM_PROMPT = """Sei un assistente IA dell'Ambulatorio Infermieristico. Il tuo compito è aiutare gli utenti eseguendo azioni nel sistema.
 
 DATA ODIERNA: {today}
@@ -2257,6 +2393,7 @@ CAPACITÀ:
 3. **Statistiche**: Consultare e confrontare statistiche di mesi/anni diversi
 4. **Generare PDF**: Statistiche, cartelle pazienti (complete o sezioni specifiche)
 5. **Compilare schede**: Creare e copiare schede MED e PICC
+6. **Annullare azioni**: Puoi annullare le ultime 10 azioni con "annulla" o "undo"
 
 ORARI DISPONIBILI:
 - MATTINA: 08:30, 09:00, 09:30, 10:00, 10:30, 11:00, 11:30, 12:00, 12:30, 13:00
