@@ -3547,9 +3547,12 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             patient = await find_patient(patient_name)
             
             if patient:
-                return {"success": True, "patient": patient, 
+                patient_info = {"id": patient["id"], "cognome": patient.get("cognome", ""), "nome": patient.get("nome", ""), "tipo": patient.get("tipo", "")}
+                return {"success": True, 
+                        "patient": patient_info, 
                         "navigate_to": f"/pazienti/{patient['id']}",
-                        "message": f"📂 Apro la cartella di **{patient['cognome']} {patient['nome']}**..."}
+                        "message": f"📂 Apro la cartella di **{patient['cognome']} {patient['nome']}**...",
+                        "action_type": "open_patient"}
             return {"success": False, "message": f"❌ Paziente '{patient_name}' non trovato"}
         
         # ==================== CREATE SCHEDA IMPIANTO ====================
