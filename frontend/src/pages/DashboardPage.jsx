@@ -156,7 +156,9 @@ export default function DashboardPage() {
           )}
           <Card className="border-green-200 bg-green-50/50">
             <CardContent className="pt-4 pb-3 px-4">
-              <div className="text-3xl font-bold text-green-600">{stats.totaleInCura}</div>
+              <div className="text-3xl font-bold text-green-600">
+                {loading ? <span className="animate-pulse">—</span> : stats.totaleInCura}
+              </div>
               <p className="text-sm text-green-600/80 font-medium">In Cura</p>
             </CardContent>
           </Card>
