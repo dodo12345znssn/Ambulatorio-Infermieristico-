@@ -138,7 +138,9 @@ export default function DashboardPage() {
           )}
           <Card className="border-emerald-200 bg-emerald-50/50">
             <CardContent className="pt-4 pb-3 px-4">
-              <div className="text-3xl font-bold text-emerald-600">{stats.totalePICC}</div>
+              <div className="text-3xl font-bold text-emerald-600">
+                {loading ? <span className="animate-pulse">—</span> : stats.totalePICC}
+              </div>
               <p className="text-sm text-emerald-600/80 font-medium">Pazienti PICC</p>
             </CardContent>
           </Card>
