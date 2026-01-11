@@ -872,14 +872,22 @@ export default function AIAssistant() {
                       <Bot className="w-7 h-7 text-blue-600" />
                     </div>
                     <h4 className="font-semibold text-gray-800 mb-2">Ciao! Come posso aiutarti?</h4>
-                    <p className="text-xs text-gray-500 mb-3">Gestisco pazienti, appuntamenti, statistiche e PDF</p>
-                    <div className="space-y-1.5 text-xs text-gray-400 text-left">
-                      <p>💡 "Appuntamento per Rossi alle 15 di domani"</p>
-                      <p>💡 "Crea pazienti: Rossi Mario PICC, Bianchi Luigi MED"</p>
-                      <p>💡 "Sospendi Rossi, Bianchi e Verdi"</p>
-                      <p>💡 "Dimetti tutti: Rossi, Bianchi, Neri"</p>
-                      <p>📷 "Carica foto con nomi e scrivi 'aggiungi come PICC'"</p>
-                      <p>💡 "Quanti PICC ho impiantato a maggio?"</p>
+                    <p className="text-xs text-gray-500 mb-4">Gestisco pazienti, appuntamenti, statistiche e PDF</p>
+                    
+                    {/* Suggerimenti Intelligenti */}
+                    <div className="w-full space-y-2">
+                      <p className="text-xs text-gray-400 font-medium">🚀 Azioni rapide:</p>
+                      <div className="flex flex-wrap justify-center gap-2">
+                        {getSmartSuggestions().map((suggestion, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => handleSuggestionClick(suggestion)}
+                            className="text-xs px-3 py-1.5 bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-full hover:from-blue-600 hover:to-indigo-600 transition-all shadow-sm hover:shadow-md"
+                          >
+                            {suggestion.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 ) : (
@@ -899,7 +907,26 @@ export default function AIAssistant() {
                           </div>
                           <div className={`rounded-2xl px-3 py-2 ${msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-800'}`}>
                             <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                            {msg.role === 'assistant' && (
+                            
+                            {/* Opzioni Workflow */}
+                            {msg.workflowOptions && (
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                {msg.workflowOptions.map((opt, optIdx) => (
+                                  <button
+                                    key={optIdx}
+                                    onClick={() => {
+                                      setInputValue(opt);
+                                      handleWorkflowInput(opt);
+                                    }}
+                                    className="text-xs px-2 py-1 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-colors"
+                                  >
+                                    {opt}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                            
+                            {msg.role === 'assistant' && !msg.workflowOptions && (
                               <div className="mt-1 flex items-center gap-2">
                                 <button
                                   onClick={() => speakResponse(msg.content)}
@@ -923,6 +950,27 @@ export default function AIAssistant() {
                         </div>
                       </div>
                     ))}
+                    
+                    {/* Suggerimenti contestuali dopo la chat */}
+                    {showSuggestions && contextMemory.lastPatient && messages.length > 0 && !isLoading && (
+                      <div className="mt-2 p-2 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-100">
+                        <p className="text-xs text-blue-600 font-medium mb-2">
+                          💡 Azioni per {contextMemory.lastPatient.cognome}:
+                        </p>
+                        <div className="flex flex-wrap gap-1">
+                          {getSmartSuggestions().slice(0, 4).map((suggestion, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => handleSuggestionClick(suggestion)}
+                              className="text-xs px-2 py-1 bg-white text-blue-600 rounded-full border border-blue-200 hover:bg-blue-50 transition-colors"
+                            >
+                              {suggestion.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
                     {isLoading && (
                       <div className="flex justify-start">
                         <div className="flex items-start gap-2">
