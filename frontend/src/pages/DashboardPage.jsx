@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useAmbulatorio, apiClient } from "@/App";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Calendar, Users, FileText, BarChart3, UserCheck, Activity, ClipboardList } from "lucide-react";
+import { Calendar, Users, FileText, BarChart3, UserCheck, Activity, ClipboardList, Syringe } from "lucide-react";
 import { toast } from "sonner";
 
 const DASHBOARD_ITEMS = [
@@ -21,6 +21,14 @@ const DASHBOARD_ITEMS = [
     icon: Users,
     path: "/pazienti",
     color: "pazienti",
+  },
+  {
+    id: "impianti",
+    title: "Impianti",
+    description: "Registro impianti PICC, Port e Midline",
+    icon: Syringe,
+    path: "/impianti",
+    color: "impianti",
   },
   {
     id: "prescrizioni",
