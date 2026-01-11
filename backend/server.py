@@ -2570,6 +2570,7 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             tipo_impianto = params.get("tipo_impianto", "tutti")
             anno = params.get("anno", datetime.now().year)
             mese = params.get("mese")
+            generate_pdf = params.get("generate_pdf", False)
             
             # Build date range
             if mese:
@@ -2608,18 +2609,27 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
                 count = tipo_counts.get(tipo_impianto, 0)
                 label = tipo_labels.get(tipo_impianto, tipo_impianto.upper())
                 msg = f"📊 **Statistiche Impianti - {periodo}**\n\n"
-                msg += f"🔹 **{label}**: {count} impianti\n\n"
-                msg += "Vuoi che ti scarichi il report PDF del mese?"
+                msg += f"🔹 **{label}**: {count} impianti\n"
             else:
                 msg = f"📊 **Statistiche Impianti - {periodo}**\n\n"
                 msg += f"📈 Totale: **{len(schede)}** impianti\n\n"
                 for t, c in tipo_counts.items():
                     label = tipo_labels.get(t, t)
                     msg += f"🔹 {label}: {c}\n"
-                msg += "\nVuoi che ti scarichi il report PDF?"
             
-            return {"success": True, "totale": len(schede), "per_tipo": tipo_counts, 
+            if generate_pdf:
+                msg += "\n\n📥 Clicca 'Scarica PDF' per il report."
+            else:
+                msg += "\n\nVuoi che generi il report PDF?"
+            
+            result = {"success": True, "totale": len(schede), "per_tipo": tipo_counts, 
                     "periodo": periodo, "message": msg, "offer_pdf": True}
+            
+            if generate_pdf:
+                result["pdf_endpoint"] = f"/statistics/implants/pdf?ambulatorio={ambulatorio}&anno={anno}&mese={mese or ''}&tipo={tipo_impianto}"
+                result["filename"] = f"impianti_{periodo.replace(' ', '_')}.pdf"
+            
+            return result
         
         # ==================== GET PRESTAZIONI STATISTICS ====================
         elif action_type == "get_prestazioni_statistics":
