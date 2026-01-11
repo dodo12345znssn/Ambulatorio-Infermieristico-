@@ -2300,11 +2300,15 @@ async def get_ai_response(message: str, session_id: str, ambulatorio: str, user_
         context = "\n".join(context_messages)
         full_message = f"{context}\n\nUSER: {message}" if context else message
         
+        # Format system prompt with today's date
+        today = datetime.now().strftime("%Y-%m-%d")
+        formatted_prompt = SYSTEM_PROMPT.format(today=today)
+        
         # Initialize chat
         chat = LlmChat(
             api_key=api_key,
             session_id=session_id,
-            system_message=SYSTEM_PROMPT
+            system_message=formatted_prompt
         ).with_model("openai", "gpt-4o")
         
         user_msg = UserMessage(text=full_message)
