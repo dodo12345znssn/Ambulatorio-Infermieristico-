@@ -759,16 +759,16 @@ export default function PatientDetailPage() {
             {statusAction === "dimesso" && (
               <div className="space-y-2">
                 <Label>Motivazione *</Label>
-                <Select value={statusReason} onValueChange={setStatusReason}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Seleziona motivazione" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="guarito">Guarito</SelectItem>
-                    <SelectItem value="adi">ADI</SelectItem>
-                    <SelectItem value="altro">Altro</SelectItem>
-                  </SelectContent>
-                </Select>
+                <SimpleSelect 
+                  value={statusReason} 
+                  onChange={setStatusReason}
+                  options={[
+                    { value: "guarito", label: "Guarito" },
+                    { value: "adi", label: "ADI" },
+                    { value: "altro", label: "Altro" }
+                  ]}
+                  placeholder="Seleziona motivazione"
+                />
               </div>
             )}
 
