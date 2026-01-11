@@ -2756,10 +2756,19 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             if not appointment:
                 return {"success": False, "message": f"❌ Nessun appuntamento trovato per {patient['cognome']} {patient['nome']} il {data}"}
             
+            # Salva per undo (copia i dati dell'appuntamento)
+            appointment_copy = {k: v for k, v in appointment.items() if k != "_id"}
+            await save_undo_action(
+                user_id, ambulatorio, "delete_appointment",
+                f"Eliminato appuntamento di {patient['cognome']} {patient['nome']} del {data}",
+                {"appointment_data": appointment_copy}
+            )
+            
             # Elimina
             await db.appointments.delete_one({"id": appointment["id"]})
             return {"success": True, 
-                    "message": f"✅ Appuntamento eliminato!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📅 {data} alle {appointment.get('ora', 'N/A')}"}
+                    "message": f"✅ Appuntamento eliminato!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📅 {data} alle {appointment.get('ora', 'N/A')}\n\n💡 Puoi annullare dicendo 'annulla'",
+                    "can_undo": True}
         
         # ==================== GET IMPLANT STATISTICS ====================
         elif action_type == "get_implant_statistics":
