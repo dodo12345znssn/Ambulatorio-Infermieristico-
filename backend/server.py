@@ -667,6 +667,20 @@ async def get_appointments(
         query["tipo"] = tipo
     
     appointments = await db.appointments.find(query, {"_id": 0}).sort([("data", 1), ("ora", 1)]).to_list(1000)
+    
+    # Ensure patient names are populated (for old appointments without this data)
+    for apt in appointments:
+        if not apt.get("patient_nome") or not apt.get("patient_cognome"):
+            patient = await db.patients.find_one({"id": apt.get("patient_id")}, {"_id": 0})
+            if patient:
+                apt["patient_nome"] = patient.get("nome", "")
+                apt["patient_cognome"] = patient.get("cognome", "")
+                # Update the appointment in DB for future queries
+                await db.appointments.update_one(
+                    {"id": apt["id"]},
+                    {"$set": {"patient_nome": apt["patient_nome"], "patient_cognome": apt["patient_cognome"]}}
+                )
+    
     return appointments
 
 @api_router.put("/appointments/{appointment_id}", response_model=Appointment)
