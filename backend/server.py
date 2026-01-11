@@ -3025,12 +3025,20 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             }
             await db.schede_impianto_picc.insert_one(scheda)
             
+            # Salva per undo
+            await save_undo_action(
+                user_id, ambulatorio, "create_scheda_impianto",
+                f"Creata scheda impianto per {patient['cognome']} {patient['nome']}",
+                {"scheda_id": scheda["id"]}
+            )
+            
             tipo_labels = {"picc": "PICC", "midline": "Midline", "picc_port": "PICC Port", "port_a_cath": "Port-a-cath"}
             label = tipo_labels.get(tipo_catetere, tipo_catetere.upper())
             
             return {"success": True, 
-                    "message": f"✅ Scheda impianto creata!\n\n👤 **{patient['cognome']} {patient['nome']}**\n🔹 Tipo: {label}\n📅 Data: {data_impianto}",
-                    "navigate_to": f"/pazienti/{patient['id']}"}
+                    "message": f"✅ Scheda impianto creata!\n\n👤 **{patient['cognome']} {patient['nome']}**\n🔹 Tipo: {label}\n📅 Data: {data_impianto}\n\n💡 Puoi annullare dicendo 'annulla'",
+                    "navigate_to": f"/pazienti/{patient['id']}",
+                    "can_undo": True}
         
         # ==================== GET STATISTICS (legacy) ====================
         elif action_type == "get_statistics":
