@@ -3194,8 +3194,15 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             
             if patients:
                 names = [f"• {p['cognome']} {p['nome']} ({p['tipo']})" for p in patients]
+                # Se un solo paziente, mettilo in memoria contestuale
+                if len(patients) == 1:
+                    patient_info = {"id": patients[0]["id"], "cognome": patients[0].get("cognome", ""), "nome": patients[0].get("nome", ""), "tipo": patients[0].get("tipo", "")}
+                    return {"success": True, "patients": patients, 
+                            "patient": patient_info,
+                            "action_type": "search_patient",
+                            "message": f"🔍 Trovato: **{patients[0]['cognome']} {patients[0]['nome']}** ({patients[0]['tipo']})\n\n💡 Cosa vuoi fare con questo paziente?"}
                 return {"success": True, "patients": patients, 
-                        "message": f"🔍 Ho trovato {len(patients)} paziente/i:\n" + "\n".join(names)}
+                        "message": f"🔍 Ho trovato {len(patients)} pazienti:\n" + "\n".join(names) + "\n\n💡 Specifica quale paziente ti interessa."}
             return {"success": False, "message": f"❌ Nessun paziente trovato con '{query}'"}
         
         # ==================== CREATE APPOINTMENT ====================
