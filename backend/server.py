@@ -2573,8 +2573,51 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"]
     
     try:
+        # ==================== UNDO ACTION ====================
+        if action_type == "undo_action":
+            action_id = params.get("action_id")
+            
+            if action_id:
+                # Annulla azione specifica
+                undo_action_data = await db.ai_undo_history.find_one({"id": action_id, "user_id": user_id, "ambulatorio": ambulatorio})
+            else:
+                # Annulla ultima azione
+                undo_action_data = await db.ai_undo_history.find_one(
+                    {"user_id": user_id, "ambulatorio": ambulatorio},
+                    sort=[("timestamp", -1)]
+                )
+            
+            if not undo_action_data:
+                return {"success": False, "message": "❌ Nessuna azione da annullare"}
+            
+            # Esegui l'annullamento
+            result = await execute_undo(undo_action_data, ambulatorio)
+            
+            # Rimuovi l'azione dallo storico
+            if result.get("success"):
+                await db.ai_undo_history.delete_one({"id": undo_action_data["id"]})
+            
+            return result
+        
+        # ==================== LIST UNDO ACTIONS ====================
+        elif action_type == "list_undo_actions":
+            actions = await get_undo_actions(user_id, ambulatorio, 10)
+            
+            if not actions:
+                return {"success": True, "message": "📋 Nessuna azione annullabile disponibile.\n\nLe azioni vengono salvate quando crei, modifichi o elimini pazienti, appuntamenti e schede."}
+            
+            msg = "📋 **Ultime azioni annullabili:**\n\n"
+            for i, action in enumerate(actions, 1):
+                timestamp = datetime.fromisoformat(action["timestamp"].replace("Z", "+00:00"))
+                time_str = timestamp.strftime("%d/%m %H:%M")
+                msg += f"{i}. {action['action_description']} ({time_str})\n"
+            
+            msg += "\n💡 Scrivi **'annulla'** per annullare l'ultima azione, oppure **'annulla azione 3'** per annullare una specifica."
+            
+            return {"success": True, "actions": actions, "message": msg}
+        
         # ==================== CREATE PATIENT ====================
-        if action_type == "create_patient":
+        elif action_type == "create_patient":
             patient_data = {
                 "id": str(uuid.uuid4()),
                 "nome": params.get("nome", ""),
@@ -2586,8 +2629,17 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
                 "updated_at": datetime.now(timezone.utc).isoformat()
             }
             await db.patients.insert_one(patient_data)
+            
+            # Salva per undo
+            await save_undo_action(
+                user_id, ambulatorio, "create_patient",
+                f"Creato paziente {params.get('cognome')} {params.get('nome')}",
+                {"patient_id": patient_data["id"]}
+            )
+            
             return {"success": True, "patient_id": patient_data["id"], 
-                    "message": f"✅ Paziente **{params.get('cognome')} {params.get('nome')}** creato con successo come {params.get('tipo', 'PICC')}!"}
+                    "message": f"✅ Paziente **{params.get('cognome')} {params.get('nome')}** creato con successo come {params.get('tipo', 'PICC')}!\n\n💡 Puoi annullare questa azione dicendo 'annulla'",
+                    "can_undo": True}
         
         # ==================== SEARCH PATIENT ====================
         elif action_type == "search_patient":
