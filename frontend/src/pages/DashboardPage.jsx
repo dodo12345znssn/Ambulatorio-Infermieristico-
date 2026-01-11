@@ -172,7 +172,9 @@ export default function DashboardPage() {
           </Card>
           <Card className="border-slate-200 bg-slate-50/50">
             <CardContent className="pt-4 pb-3 px-4">
-              <div className="text-3xl font-bold text-slate-600">{stats.totaleDimessi}</div>
+              <div className="text-3xl font-bold text-slate-600">
+                {loading ? <span className="animate-pulse">—</span> : stats.totaleDimessi}
+              </div>
               <p className="text-sm text-slate-600/80 font-medium">Dimessi</p>
             </CardContent>
           </Card>
