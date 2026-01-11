@@ -3183,18 +3183,37 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
         
         # ==================== SEARCH PATIENT ====================
         elif action_type == "search_patient":
-            query = params.get("query", "").lower()
-            patients = await db.patients.find({
-                "ambulatorio": ambulatorio,
-                "$or": [
-                    {"nome": {"$regex": query, "$options": "i"}},
-                    {"cognome": {"$regex": query, "$options": "i"}}
-                ]
-            }, {"_id": 0}).to_list(10)
+            query = params.get("query", "").strip()
+            
+            # Prova prima con find_patient che ha logica migliorata
+            patient = await find_patient(query)
+            if patient:
+                patient_info = {"id": patient["id"], "cognome": patient.get("cognome", ""), "nome": patient.get("nome", ""), "tipo": patient.get("tipo", "")}
+                return {"success": True, "patients": [patient], 
+                        "patient": patient_info,
+                        "action_type": "search_patient",
+                        "message": f"🔍 Trovato: **{patient['cognome']} {patient['nome']}** ({patient['tipo']})\n\n💡 Cosa vuoi fare con questo paziente?"}
+            
+            # Se non trova esatto, cerca parziale
+            query_lower = query.lower()
+            parts = [p.strip() for p in query_lower.split() if len(p.strip()) > 1]
+            
+            # Costruisci query che cerca tutte le parti
+            if parts:
+                or_conditions = []
+                for part in parts:
+                    or_conditions.append({"nome": {"$regex": part, "$options": "i"}})
+                    or_conditions.append({"cognome": {"$regex": part, "$options": "i"}})
+                
+                patients = await db.patients.find({
+                    "ambulatorio": ambulatorio,
+                    "$or": or_conditions
+                }, {"_id": 0}).to_list(10)
+            else:
+                patients = []
             
             if patients:
                 names = [f"• {p['cognome']} {p['nome']} ({p['tipo']})" for p in patients]
-                # Se un solo paziente, mettilo in memoria contestuale
                 if len(patients) == 1:
                     patient_info = {"id": patients[0]["id"], "cognome": patients[0].get("cognome", ""), "nome": patients[0].get("nome", ""), "tipo": patients[0].get("tipo", "")}
                     return {"success": True, "patients": patients, 
