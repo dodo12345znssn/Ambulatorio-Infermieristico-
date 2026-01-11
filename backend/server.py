@@ -2929,9 +2929,17 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             
             await db.schede_medicazione_med.insert_one(new_scheda)
             
+            # Salva per undo
+            await save_undo_action(
+                user_id, ambulatorio, "copy_scheda_med",
+                f"Copiata scheda MED per {patient['cognome']} {patient['nome']}",
+                {"scheda_id": new_scheda["id"]}
+            )
+            
             return {"success": True, 
-                    "message": f"✅ Scheda MED copiata!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📅 Nuova data: {nuova_data}\n\nHo copiato tutti i dati dalla scheda precedente.",
-                    "navigate_to": f"/pazienti/{patient['id']}"}
+                    "message": f"✅ Scheda MED copiata!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📅 Nuova data: {nuova_data}\n\nHo copiato tutti i dati dalla scheda precedente.\n\n💡 Puoi annullare dicendo 'annulla'",
+                    "navigate_to": f"/pazienti/{patient['id']}",
+                    "can_undo": True}
         
         # ==================== COPY SCHEDA GESTIONE PICC ====================
         elif action_type == "copy_scheda_gestione_picc":
@@ -2971,9 +2979,17 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
                 {"$set": {f"giorni.{nuova_data}": new_day_data, "updated_at": datetime.now(timezone.utc).isoformat()}}
             )
             
+            # Salva per undo
+            await save_undo_action(
+                user_id, ambulatorio, "copy_scheda_gestione_picc",
+                f"Copiata medicazione PICC per {patient['cognome']} {patient['nome']}",
+                {"scheda_id": last_scheda["id"], "day_key": nuova_data}
+            )
+            
             return {"success": True,
-                    "message": f"✅ Medicazione PICC copiata!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📅 Nuova data: {nuova_data}\n\nHo copiato i dati dalla medicazione precedente ({last_day_key}).",
-                    "navigate_to": f"/pazienti/{patient['id']}"}
+                    "message": f"✅ Medicazione PICC copiata!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📅 Nuova data: {nuova_data}\n\nHo copiato i dati dalla medicazione precedente ({last_day_key}).\n\n💡 Puoi annullare dicendo 'annulla'",
+                    "navigate_to": f"/pazienti/{patient['id']}",
+                    "can_undo": True}
         
         # ==================== OPEN PATIENT ====================
         elif action_type == "open_patient":
