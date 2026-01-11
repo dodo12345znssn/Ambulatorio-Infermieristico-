@@ -2488,6 +2488,8 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             appointment = {
                 "id": str(uuid.uuid4()),
                 "patient_id": patient["id"],
+                "patient_nome": patient.get("nome", ""),
+                "patient_cognome": patient.get("cognome", ""),
                 "ambulatorio": ambulatorio,
                 "data": data,
                 "ora": ora,
