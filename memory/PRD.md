@@ -15,6 +15,25 @@ Applicazione web full-stack per la gestione di un ambulatorio infermieristico co
 
 ## Funzionalità Implementate
 
+### Sessione 11/01/2026 - Update 7
+
+#### Assistente IA - Miglioramenti Avanzati
+- **Appuntamenti visibili in agenda**: Ora mostrano il nome del paziente (es. "Rossi E.") invece di un punto
+- **Creazione appuntamenti intelligente**:
+  - Supporto per "primo orario disponibile del pomeriggio" (dalle 15:00)
+  - Supporto per "primo orario disponibile del mattina" (dalle 09:00)
+  - Se orario richiesto è pieno, suggerisce il primo disponibile con conferma
+- **Eliminazione appuntamenti**: "Elimina appuntamento di Rossi del 10/01"
+- **Statistiche dettagliate impianti**:
+  - "Quanti PICC/Midline/Port ho messo a maggio 2025?"
+  - Risponde con numero e offre download PDF
+- **Copia schede MED**: "Compila scheda MED di Cammarata copiandola dalla precedente con data odierna"
+- **Copia medicazioni PICC**: "Copia medicazione PICC di Rossi con data odierna"
+- **Orari disponibili**:
+  - Mattina: 09:00-12:30
+  - Pomeriggio: 15:00-17:30
+  - Max 2 pazienti per slot
+
 ### Sessione 09/01/2026 - Update 6
 
 #### Assistente IA Integrato
