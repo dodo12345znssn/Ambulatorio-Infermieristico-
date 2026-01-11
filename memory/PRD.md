@@ -15,6 +15,35 @@ Applicazione web full-stack per la gestione di un ambulatorio infermieristico co
 
 ## Funzionalità Implementate
 
+### Sessione 11/01/2026 - Update 8
+
+#### Chat IA Spostabile
+- La finestra della chat IA può essere **trascinata** ovunque nella pagina
+- Icona drag (≡) nell'header per spostare
+- Pulsante per ripristinare la posizione originale
+- Pulsante minimizza/espandi
+
+#### Gestione Pazienti tramite IA
+- **Sospendi paziente**: "Sospendi il paziente Rossi" → stato temporaneamente sospeso
+- **Riprendi in cura**: "Riprendi in cura Rossi" → paziente riattivato
+- **Dimetti paziente**: "Dimetti Rossi" → paziente dimesso con data
+- **Elimina paziente**: "Elimina definitivamente Rossi" → rimuove tutti i dati
+
+#### Generazione PDF tramite IA
+- **Statistiche con PDF**: "Quanti PICC ho messo a maggio? Genera PDF" → scarica report
+- **Confronto statistiche**: "Confronta 2025 vs 2026" → tabella confronto con PDF opzionale
+- **Stampa cartella paziente**:
+  - "Stampa cartella di Rossi" → PDF completo
+  - "Stampa solo anagrafica di Rossi" → solo sezione anagrafica
+  - "Stampa scheda impianto di Rossi" → solo scheda impianto
+  - "Stampa gestione PICC di Rossi" → solo gestione PICC
+  - "Stampa scheda MED di Verdi" → solo scheda medicazione
+
+#### Miglioramenti Appuntamenti
+- Orari aggiornati: Mattina (08:30-13:00), Pomeriggio (15:00-17:00)
+- Il pomeriggio inizia alle 15:00 (non alle 13:00)
+- Ricerca paziente migliorata per cognome e nome
+
 ### Sessione 11/01/2026 - Update 7
 
 #### Assistente IA - Miglioramenti Avanzati
