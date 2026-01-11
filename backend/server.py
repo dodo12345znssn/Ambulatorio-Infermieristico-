@@ -2426,6 +2426,8 @@ AZIONI DISPONIBILI:
 - resume_patient: {{"patient_name": "cognome nome"}} - Riprende in cura il paziente sospeso
 - discharge_patient: {{"patient_name": "cognome nome"}} - Dimette il paziente
 - delete_patient: {{"patient_name": "cognome nome"}} - Elimina definitivamente il paziente
+- undo_action: {{}} - Annulla l'ultima azione (o {{"action_id": "..."}}} per annullare una specifica)
+- list_undo_actions: {{}} - Mostra le ultime 10 azioni annullabili
 - get_implant_statistics: {{"tipo_impianto": "picc/midline/picc_port/port_a_cath/tutti", "anno": 2025, "mese": 1-12 o null, "generate_pdf": true/false}}
 - get_prestazioni_statistics: {{"tipo": "PICC/MED/tutti", "anno": 2025, "mese": 1-12 o null, "generate_pdf": true/false}}
 - compare_statistics: {{"tipo": "PICC/MED/IMPIANTI/tutti", "periodo1": {{"anno": 2025, "mese": null}}, "periodo2": {{"anno": 2026, "mese": null}}, "generate_pdf": true/false}}
@@ -2439,14 +2441,11 @@ AZIONI DISPONIBILI:
 ESEMPI:
 - "Appuntamento per Rossi alle 15 di domani" -> {{"action": "create_appointment", "params": {{"patient_name": "Rossi", "data": "YYYY-MM-DD", "ora": "15:00"}}, "message": "Creo appuntamento..."}}
 - "Sospendi il paziente Bianchi" -> {{"action": "suspend_patient", "params": {{"patient_name": "Bianchi"}}, "message": "Sospendo il paziente..."}}
-- "Riprendi in cura Rossi" -> {{"action": "resume_patient", "params": {{"patient_name": "Rossi"}}, "message": "Riprendo in cura..."}}
-- "Dimetti il paziente Verdi" -> {{"action": "discharge_patient", "params": {{"patient_name": "Verdi"}}, "message": "Dimetto il paziente..."}}
+- "Annulla" o "Torna indietro" -> {{"action": "undo_action", "params": {{}}, "message": "Annullo l'ultima azione..."}}
+- "Mostra azioni annullabili" -> {{"action": "list_undo_actions", "params": {{}}, "message": "Ecco le ultime azioni..."}}
 - "Elimina definitivamente il paziente Neri" -> {{"action": "delete_patient", "params": {{"patient_name": "Neri"}}, "message": "Elimino definitivamente..."}}
 - "Quanti PICC ho messo a maggio? Genera PDF" -> {{"action": "get_implant_statistics", "params": {{"tipo_impianto": "picc", "anno": 2025, "mese": 5, "generate_pdf": true}}, "message": "Genero statistiche e PDF..."}}
 - "Confronta statistiche 2025 vs 2026" -> {{"action": "compare_statistics", "params": {{"tipo": "tutti", "periodo1": {{"anno": 2025, "mese": null}}, "periodo2": {{"anno": 2026, "mese": null}}}}, "message": "Confronto i due anni..."}}
-- "Stampa cartella di Rossi" -> {{"action": "print_patient_folder", "params": {{"patient_name": "Rossi", "sezione": "completa"}}, "message": "Genero PDF della cartella..."}}
-- "Stampa solo anagrafica di Bianchi" -> {{"action": "print_patient_folder", "params": {{"patient_name": "Bianchi", "sezione": "anagrafica"}}, "message": "Genero PDF anagrafica..."}}
-- "Stampa scheda impianto di Verdi" -> {{"action": "print_patient_folder", "params": {{"patient_name": "Verdi", "sezione": "impianto"}}, "message": "Genero PDF scheda impianto..."}}
 
 Per domande generiche (es. "Ciao"), rispondi normalmente senza JSON."""
 
