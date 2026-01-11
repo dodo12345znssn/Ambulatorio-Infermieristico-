@@ -52,12 +52,222 @@ export default function AIAssistant() {
   const [isExtracting, setIsExtracting] = useState(false);
   const fileInputRef = useRef(null);
   
+  // NUOVO: Memoria contestuale e workflow
+  const [contextMemory, setContextMemory] = useState({
+    lastPatient: null,        // Ultimo paziente menzionato
+    lastAction: null,         // Ultima azione eseguita
+    workflowStep: null,       // Step corrente del workflow
+    workflowType: null        // Tipo di workflow attivo
+  });
+  const [showSuggestions, setShowSuggestions] = useState(true);
+  const [activeWorkflow, setActiveWorkflow] = useState(null);
+  
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const recognitionRef = useRef(null);
   const chatRef = useRef(null);
 
-  // Initialize speech recognition
+  // Suggerimenti intelligenti basati sul contesto
+  const getSmartSuggestions = () => {
+    const { lastPatient, lastAction } = contextMemory;
+    
+    // Se c'è un paziente in memoria, suggerisci azioni su di lui
+    if (lastPatient) {
+      const patientName = `${lastPatient.cognome} ${lastPatient.nome}`;
+      const isPICC = lastPatient.tipo === "PICC" || lastPatient.tipo === "PICC_MED";
+      const isMED = lastPatient.tipo === "MED" || lastPatient.tipo === "PICC_MED";
+      
+      return [
+        { label: `📅 Appuntamento ${lastPatient.cognome}`, action: `Crea appuntamento per ${patientName} domani mattina` },
+        isPICC && { label: `📋 Copia scheda PICC`, action: `${patientName} copia ultima scheda gestione picc data di oggi` },
+        isMED && { label: `📋 Copia scheda MED`, action: `${patientName} copia ultima scheda medicazione med data di oggi` },
+        { label: `📄 Stampa cartella`, action: `Stampa cartella clinica di ${patientName}` },
+        { label: `🔄 Altro paziente`, action: null, clear: true }
+      ].filter(Boolean);
+    }
+    
+    // Suggerimenti generali
+    return [
+      { label: "➕ Nuovo paziente", action: null, workflow: "new_patient" },
+      { label: "📅 Nuovo appuntamento", action: null, workflow: "new_appointment" },
+      { label: "📊 Statistiche mese", action: "Quante prestazioni ho fatto questo mese?" },
+      { label: "📋 Copia scheda", action: null, workflow: "copy_scheda" },
+      { label: "🔍 Cerca paziente", action: null, workflow: "search_patient" }
+    ];
+  };
+
+  // Workflow guidati
+  const workflows = {
+    new_patient: {
+      title: "Nuovo Paziente",
+      steps: [
+        { prompt: "Come si chiama il paziente? (Cognome Nome)", field: "nome" },
+        { prompt: "Che tipo di paziente è?", options: ["PICC", "MED", "PICC + MED"], field: "tipo" },
+        { prompt: "Codice fiscale (opzionale, premi Invio per saltare)", field: "cf", optional: true }
+      ],
+      buildAction: (data) => `Crea paziente ${data.nome} tipo ${data.tipo}${data.cf ? ` codice fiscale ${data.cf}` : ''}`
+    },
+    new_appointment: {
+      title: "Nuovo Appuntamento",
+      steps: [
+        { prompt: "Per quale paziente? (Cognome Nome)", field: "paziente" },
+        { prompt: "Quando?", options: ["Oggi", "Domani", "Dopodomani", "Scrivi data..."], field: "data" },
+        { prompt: "Mattina o pomeriggio?", options: ["Mattina (8:00-12:00)", "Pomeriggio (15:00-18:00)"], field: "turno" }
+      ],
+      buildAction: (data) => {
+        const turno = data.turno.includes("Mattina") ? "mattina" : "pomeriggio";
+        return `Crea appuntamento per ${data.paziente} ${data.data.toLowerCase()} ${turno}`;
+      }
+    },
+    copy_scheda: {
+      title: "Copia Scheda Medicazione",
+      steps: [
+        { prompt: "Per quale paziente?", field: "paziente" },
+        { prompt: "Tipo di scheda?", options: ["Gestione PICC", "Medicazione MED"], field: "tipo_scheda" },
+        { prompt: "Con quale data?", options: ["Oggi", "Domani", "Scrivi data..."], field: "data" }
+      ],
+      buildAction: (data) => {
+        const scheda = data.tipo_scheda.includes("PICC") ? "gestione picc" : "medicazione med";
+        return `${data.paziente} copia ultima scheda ${scheda} data di ${data.data.toLowerCase()}`;
+      }
+    },
+    search_patient: {
+      title: "Cerca Paziente",
+      steps: [
+        { prompt: "Scrivi il nome del paziente da cercare", field: "nome" }
+      ],
+      buildAction: (data) => `Cerca paziente ${data.nome}`
+    }
+  };
+
+  const [workflowData, setWorkflowData] = useState({});
+  const [currentWorkflowStep, setCurrentWorkflowStep] = useState(0);
+
+  const startWorkflow = (workflowType) => {
+    const workflow = workflows[workflowType];
+    if (!workflow) return;
+    
+    setActiveWorkflow(workflowType);
+    setWorkflowData({});
+    setCurrentWorkflowStep(0);
+    setShowSuggestions(false);
+    
+    const firstStep = workflow.steps[0];
+    setMessages(prev => [...prev, {
+      role: "assistant",
+      content: `🔄 **${workflow.title}** - Step 1/${workflow.steps.length}\n\n${firstStep.prompt}`,
+      workflowOptions: firstStep.options
+    }]);
+  };
+
+  const handleWorkflowInput = (input) => {
+    if (!activeWorkflow) return false;
+    
+    const workflow = workflows[activeWorkflow];
+    const currentStep = workflow.steps[currentWorkflowStep];
+    
+    // Salva il dato
+    const newData = { ...workflowData, [currentStep.field]: input };
+    setWorkflowData(newData);
+    
+    // Prossimo step o completa
+    if (currentWorkflowStep < workflow.steps.length - 1) {
+      const nextStep = workflow.steps[currentWorkflowStep + 1];
+      setCurrentWorkflowStep(prev => prev + 1);
+      
+      setMessages(prev => [...prev, 
+        { role: "user", content: input },
+        { 
+          role: "assistant", 
+          content: `✅ **${workflow.title}** - Step ${currentWorkflowStep + 2}/${workflow.steps.length}\n\n${nextStep.prompt}`,
+          workflowOptions: nextStep.options
+        }
+      ]);
+      return true;
+    } else {
+      // Workflow completato - esegui azione
+      const action = workflow.buildAction(newData);
+      setActiveWorkflow(null);
+      setWorkflowData({});
+      setCurrentWorkflowStep(0);
+      setShowSuggestions(true);
+      
+      // Invia il comando all'IA
+      setInputValue(action);
+      setTimeout(() => {
+        setMessages(prev => [...prev, { role: "user", content: input }]);
+        sendMessageDirect(action);
+      }, 100);
+      return true;
+    }
+  };
+
+  // Invia messaggio direttamente (per workflow)
+  const sendMessageDirect = async (message) => {
+    setIsLoading(true);
+    try {
+      const response = await apiClient.post("/ai/chat", {
+        message,
+        session_id: sessionId,
+        ambulatorio
+      });
+
+      const { response: aiResponse, session_id: newSessionId, action_performed } = response.data;
+      
+      if (!sessionId) setSessionId(newSessionId);
+
+      // Aggiorna memoria contestuale
+      if (action_performed?.patient) {
+        setContextMemory(prev => ({
+          ...prev,
+          lastPatient: action_performed.patient,
+          lastAction: action_performed.action_type
+        }));
+      }
+
+      const hasPdf = action_performed?.pdf_url || action_performed?.pdf_endpoint;
+      
+      setMessages(prev => [...prev, { 
+        role: "assistant", 
+        content: aiResponse,
+        pdfData: hasPdf ? action_performed : null
+      }]);
+
+      if (action_performed?.navigate_to) {
+        toast.success("Apertura in corso...");
+        setTimeout(() => navigate(action_performed.navigate_to), 1000);
+      }
+
+      loadSessions();
+    } catch (error) {
+      console.error("Chat error:", error);
+      setMessages(prev => [...prev, { 
+        role: "assistant", 
+        content: "Mi dispiace, ho avuto un problema. Riprova." 
+      }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Gestisci click su suggerimento
+  const handleSuggestionClick = (suggestion) => {
+    if (suggestion.clear) {
+      setContextMemory({ lastPatient: null, lastAction: null, workflowStep: null, workflowType: null });
+      setMessages(prev => [...prev, { role: "assistant", content: "✨ Ok! Come posso aiutarti?" }]);
+      return;
+    }
+    
+    if (suggestion.workflow) {
+      startWorkflow(suggestion.workflow);
+      return;
+    }
+    
+    if (suggestion.action) {
+      setInputValue(suggestion.action);
+      setTimeout(() => sendMessage(), 100);
+    }
+  };
   useEffect(() => {
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
