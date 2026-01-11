@@ -129,7 +129,9 @@ export default function DashboardPage() {
           {!isVillaGinestre && (
             <Card className="border-blue-200 bg-blue-50/50">
               <CardContent className="pt-4 pb-3 px-4">
-                <div className="text-3xl font-bold text-blue-600">{stats.totaleMED}</div>
+                <div className="text-3xl font-bold text-blue-600">
+                  {loading ? <span className="animate-pulse">—</span> : stats.totaleMED}
+                </div>
                 <p className="text-sm text-blue-600/80 font-medium">Pazienti MED</p>
               </CardContent>
             </Card>
