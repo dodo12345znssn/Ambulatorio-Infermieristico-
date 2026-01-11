@@ -2801,6 +2801,201 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             else:
                 return await execute_ai_action({"action": "get_prestazioni_statistics", "params": params}, ambulatorio, user_id)
         
+        # ==================== SUSPEND PATIENT ====================
+        elif action_type == "suspend_patient":
+            patient_name = params.get("patient_name", "")
+            patient = await find_patient(patient_name)
+            
+            if not patient:
+                return {"success": False, "message": f"❌ Paziente '{patient_name}' non trovato"}
+            
+            if patient.get("status") == "sospeso":
+                return {"success": False, "message": f"⚠️ Il paziente **{patient['cognome']} {patient['nome']}** è già sospeso"}
+            
+            await db.patients.update_one(
+                {"id": patient["id"]},
+                {"$set": {"status": "sospeso", "updated_at": datetime.now(timezone.utc).isoformat()}}
+            )
+            
+            return {"success": True, 
+                    "message": f"✅ Paziente sospeso!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📋 Stato: Sospeso\n\nIl paziente è stato temporaneamente sospeso."}
+        
+        # ==================== RESUME PATIENT ====================
+        elif action_type == "resume_patient":
+            patient_name = params.get("patient_name", "")
+            patient = await find_patient(patient_name)
+            
+            if not patient:
+                return {"success": False, "message": f"❌ Paziente '{patient_name}' non trovato"}
+            
+            if patient.get("status") == "in_cura":
+                return {"success": False, "message": f"⚠️ Il paziente **{patient['cognome']} {patient['nome']}** è già in cura"}
+            
+            await db.patients.update_one(
+                {"id": patient["id"]},
+                {"$set": {"status": "in_cura", "updated_at": datetime.now(timezone.utc).isoformat()}}
+            )
+            
+            return {"success": True, 
+                    "message": f"✅ Paziente ripreso in cura!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📋 Stato: In cura\n\nIl paziente è stato ripreso in cura."}
+        
+        # ==================== DISCHARGE PATIENT ====================
+        elif action_type == "discharge_patient":
+            patient_name = params.get("patient_name", "")
+            patient = await find_patient(patient_name)
+            
+            if not patient:
+                return {"success": False, "message": f"❌ Paziente '{patient_name}' non trovato"}
+            
+            if patient.get("status") == "dimesso":
+                return {"success": False, "message": f"⚠️ Il paziente **{patient['cognome']} {patient['nome']}** è già dimesso"}
+            
+            await db.patients.update_one(
+                {"id": patient["id"]},
+                {"$set": {"status": "dimesso", "data_dimissione": datetime.now().strftime("%Y-%m-%d"), "updated_at": datetime.now(timezone.utc).isoformat()}}
+            )
+            
+            return {"success": True, 
+                    "message": f"✅ Paziente dimesso!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📋 Stato: Dimesso\n📅 Data dimissione: {datetime.now().strftime('%d/%m/%Y')}\n\nIl paziente è stato dimesso."}
+        
+        # ==================== DELETE PATIENT ====================
+        elif action_type == "delete_patient":
+            patient_name = params.get("patient_name", "")
+            patient = await find_patient(patient_name)
+            
+            if not patient:
+                return {"success": False, "message": f"❌ Paziente '{patient_name}' non trovato"}
+            
+            patient_id = patient["id"]
+            nome_completo = f"{patient['cognome']} {patient['nome']}"
+            
+            # Delete all related data
+            await db.appointments.delete_many({"patient_id": patient_id})
+            await db.schede_impianto_picc.delete_many({"patient_id": patient_id})
+            await db.schede_gestione_picc.delete_many({"patient_id": patient_id})
+            await db.schede_medicazione_med.delete_many({"patient_id": patient_id})
+            await db.prescrizioni.delete_many({"patient_id": patient_id})
+            await db.patients.delete_one({"id": patient_id})
+            
+            return {"success": True, 
+                    "message": f"✅ Paziente eliminato definitivamente!\n\n👤 **{nome_completo}**\n\n⚠️ Tutti i dati del paziente sono stati eliminati (appuntamenti, schede, prescrizioni)."}
+        
+        # ==================== COMPARE STATISTICS ====================
+        elif action_type == "compare_statistics":
+            tipo = params.get("tipo", "tutti")
+            periodo1 = params.get("periodo1", {})
+            periodo2 = params.get("periodo2", {})
+            generate_pdf = params.get("generate_pdf", False)
+            
+            anno1 = periodo1.get("anno", datetime.now().year - 1)
+            mese1 = periodo1.get("mese")
+            anno2 = periodo2.get("anno", datetime.now().year)
+            mese2 = periodo2.get("mese")
+            
+            async def get_stats_for_period(anno, mese, tipo):
+                if mese:
+                    start_date = f"{anno}-{mese:02d}-01"
+                    end_date = f"{anno}-{mese + 1:02d}-01" if mese < 12 else f"{anno + 1}-01-01"
+                else:
+                    start_date = f"{anno}-01-01"
+                    end_date = f"{anno + 1}-01-01"
+                
+                query = {
+                    "ambulatorio": ambulatorio,
+                    "data": {"$gte": start_date, "$lt": end_date},
+                    "stato": {"$ne": "non_presentato"}
+                }
+                if tipo and tipo not in ["tutti", "IMPIANTI"]:
+                    query["tipo"] = tipo
+                
+                appointments = await db.appointments.find(query).to_list(10000)
+                
+                # Impianti
+                imp_query = {"ambulatorio": ambulatorio, "data_impianto": {"$gte": start_date, "$lt": end_date}}
+                impianti = await db.schede_impianto_picc.find(imp_query).to_list(10000)
+                
+                prestazioni_count = {}
+                for app in appointments:
+                    for prest in app.get("prestazioni", []):
+                        prestazioni_count[prest] = prestazioni_count.get(prest, 0) + 1
+                
+                return {
+                    "accessi": len(appointments),
+                    "pazienti_unici": len(set(a["patient_id"] for a in appointments)),
+                    "prestazioni": prestazioni_count,
+                    "impianti": len(impianti)
+                }
+            
+            stats1 = await get_stats_for_period(anno1, mese1, tipo)
+            stats2 = await get_stats_for_period(anno2, mese2, tipo)
+            
+            periodo1_label = f"{MESI[mese1]} {anno1}" if mese1 else f"Anno {anno1}"
+            periodo2_label = f"{MESI[mese2]} {anno2}" if mese2 else f"Anno {anno2}"
+            
+            # Calculate differences
+            diff_accessi = stats2["accessi"] - stats1["accessi"]
+            diff_pazienti = stats2["pazienti_unici"] - stats1["pazienti_unici"]
+            diff_impianti = stats2["impianti"] - stats1["impianti"]
+            
+            def format_diff(val):
+                if val > 0:
+                    return f"📈 +{val}"
+                elif val < 0:
+                    return f"📉 {val}"
+                return "➡️ 0"
+            
+            msg = f"📊 **Confronto Statistiche**\n\n"
+            msg += f"**{periodo1_label}** vs **{periodo2_label}**\n\n"
+            msg += f"| Metrica | {periodo1_label} | {periodo2_label} | Diff |\n"
+            msg += f"|---------|---------|---------|------|\n"
+            msg += f"| Accessi | {stats1['accessi']} | {stats2['accessi']} | {format_diff(diff_accessi)} |\n"
+            msg += f"| Pazienti | {stats1['pazienti_unici']} | {stats2['pazienti_unici']} | {format_diff(diff_pazienti)} |\n"
+            msg += f"| Impianti | {stats1['impianti']} | {stats2['impianti']} | {format_diff(diff_impianti)} |\n"
+            
+            if generate_pdf:
+                msg += "\n\n📥 Clicca 'Scarica PDF' per il report completo."
+            
+            result = {
+                "success": True,
+                "message": msg,
+                "stats1": stats1,
+                "stats2": stats2,
+                "periodo1": periodo1_label,
+                "periodo2": periodo2_label
+            }
+            
+            if generate_pdf:
+                result["pdf_endpoint"] = f"/statistics/compare/pdf?ambulatorio={ambulatorio}&anno1={anno1}&mese1={mese1 or ''}&anno2={anno2}&mese2={mese2 or ''}&tipo={tipo}"
+                result["filename"] = f"confronto_{periodo1_label}_{periodo2_label}.pdf"
+            
+            return result
+        
+        # ==================== PRINT PATIENT FOLDER ====================
+        elif action_type == "print_patient_folder":
+            patient_name = params.get("patient_name", "")
+            sezione = params.get("sezione", "completa")
+            patient = await find_patient(patient_name)
+            
+            if not patient:
+                return {"success": False, "message": f"❌ Paziente '{patient_name}' non trovato"}
+            
+            sezione_labels = {
+                "completa": "Cartella Completa",
+                "anagrafica": "Anagrafica",
+                "impianto": "Scheda Impianto",
+                "gestione_picc": "Gestione PICC",
+                "scheda_med": "Scheda Medicazione"
+            }
+            
+            label = sezione_labels.get(sezione, sezione)
+            
+            return {
+                "success": True,
+                "message": f"📄 **PDF Pronto!**\n\n👤 **{patient['cognome']} {patient['nome']}**\n📋 Sezione: {label}\n\nClicca 'Scarica PDF' per scaricare.",
+                "pdf_endpoint": f"/patients/{patient['id']}/export/pdf?sezione={sezione}",
+                "filename": f"{patient['cognome']}_{patient['nome']}_{sezione}.pdf"
+            }
+        
         return {"success": False, "message": "❌ Azione non riconosciuta. Prova a riformulare la richiesta."}
         
     except Exception as e:
