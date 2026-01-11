@@ -2721,8 +2721,16 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             }
             await db.appointments.insert_one(appointment)
             
+            # Salva per undo
+            await save_undo_action(
+                user_id, ambulatorio, "create_appointment",
+                f"Creato appuntamento per {patient['cognome']} {patient['nome']} il {data} alle {ora}",
+                {"appointment_id": appointment["id"]}
+            )
+            
             return {"success": True, 
-                    "message": f"✅ Appuntamento creato!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📅 {data} alle **{ora}**\n🏷️ Tipo: {tipo}"}
+                    "message": f"✅ Appuntamento creato!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📅 {data} alle **{ora}**\n🏷️ Tipo: {tipo}\n\n💡 Puoi annullare dicendo 'annulla'",
+                    "can_undo": True}
         
         # ==================== DELETE APPOINTMENT ====================
         elif action_type == "delete_appointment":
