@@ -2864,11 +2864,13 @@ REGOLE IMPORTANTI:
 - Quando l'utente dice "pomeriggio", considera SOLO orari dalle 15:00 in poi
 - I tipi paziente sono: PICC, MED, PICC_MED
 - I tipi impianto sono: picc, midline, picc_port, port_a_cath
-- Per i nomi: cerca prima per cognome, poi per nome
+- **RICERCA PAZIENTE**: Usa SEMPRE prima il COGNOME, poi il nome. Es: "Adragna Giovanni" = cognome "Adragna", nome "Giovanni"
+- **NON confondere i nomi**: Se l'utente dice "Adragna Giovanni", cerca ESATTAMENTE quel paziente, NON altri con nomi simili
 - Interagisci in modo intelligente, chiedi conferme quando necessario
 - IMPORTANTE: Quando crei un appuntamento, usa SEMPRE il tipo del paziente (se è PICC va in agenda PICC, se è MED va in agenda MED)
 - Per operazioni batch su più pazienti, usa le azioni multiple (create_multiple_patients, etc.)
 - Se l'utente carica una foto con nomi di pazienti, usa extract_patients_from_image per estrarli
+- **COPIA SCHEDE**: Per copiare l'ultima medicazione con nuova data, usa copy_scheda_med (MED) o copy_scheda_gestione_picc (PICC)
 
 FORMATO RISPOSTA:
 Per azioni, rispondi SOLO con JSON: {"action": "...", "params": {{...}, "message": "..."}}
