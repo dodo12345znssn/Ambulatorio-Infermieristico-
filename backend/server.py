@@ -2927,6 +2927,8 @@ ESEMPI:
 - "Aggiungi questa lista di pazienti come PICC: [lista da foto]" -> {"action": "add_extracted_patients", "params": {{"patients": [...], "tipo_default": "PICC"}, "message": "Aggiungo i pazienti..."}}
 - "Annulla" -> {"action": "undo_action", "params": {{}, "message": "Annullo..."}}
 - "Quanti PICC ho messo a maggio? Genera PDF" -> {"action": "get_implant_statistics", "params": {{"tipo_impianto": "picc", "anno": 2025, "mese": 5, "generate_pdf": true}, "message": "..."}}
+- "Adragna Giovanni copia ultima scheda gestione picc con data di domani" -> {"action": "copy_scheda_gestione_picc", "params": {{"patient_name": "Adragna Giovanni", "nuova_data": "YYYY-MM-DD"}, "message": "Copio la scheda..."}}
+- "Copia medicazione MED di Rossi Mario per oggi" -> {"action": "copy_scheda_med", "params": {{"patient_name": "Rossi Mario", "nuova_data": "YYYY-MM-DD"}, "message": "Copio la scheda MED..."}}
 
 Per domande generiche (es. "Ciao"), rispondi normalmente senza JSON."""
 
