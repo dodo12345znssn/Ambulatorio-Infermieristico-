@@ -46,6 +46,7 @@ export const useAmbulatorio = () => {
 // API client with auth
 export const apiClient = axios.create({
   baseURL: API,
+  timeout: 30000, // 30 second timeout to prevent hanging
 });
 
 apiClient.interceptors.request.use((config) => {
@@ -63,6 +64,10 @@ apiClient.interceptors.response.use(
       localStorage.removeItem("token");
       localStorage.removeItem("user");
       window.location.href = "/login";
+    }
+    // Log timeout errors for debugging
+    if (error.code === 'ECONNABORTED') {
+      console.error('Request timeout:', error.config?.url);
     }
     return Promise.reject(error);
   }
