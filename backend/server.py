@@ -3008,21 +3008,78 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
     
     # Helper per trovare paziente
     async def find_patient(patient_name: str):
-        name_lower = patient_name.lower()
-        parts = name_lower.split()
-        query_parts = []
-        for part in parts:
-            if len(part) > 1:
-                query_parts.append({"cognome": {"$regex": part, "$options": "i"}})
-                query_parts.append({"nome": {"$regex": part, "$options": "i"}})
+        """
+        Ricerca paziente migliorata con matching più preciso.
+        Priorità: match esatto cognome > match esatto nome > match parziale
+        """
+        name_lower = patient_name.lower().strip()
+        parts = [p.strip() for p in name_lower.split() if len(p.strip()) > 1]
         
-        if not query_parts:
+        if not parts:
             return None
+        
+        # 1. Prima prova match esatto su cognome (primo termine)
+        if len(parts) >= 1:
+            # Prova il primo termine come cognome esatto
+            exact_match = await db.patients.find_one({
+                "ambulatorio": ambulatorio,
+                "cognome": {"$regex": f"^{parts[0]}$", "$options": "i"}
+            })
+            if exact_match:
+                # Se c'è un secondo termine, verifica che corrisponda al nome
+                if len(parts) >= 2:
+                    nome_lower = exact_match.get("nome", "").lower()
+                    if parts[1] in nome_lower or nome_lower.startswith(parts[1]):
+                        return exact_match
+                else:
+                    return exact_match
+        
+        # 2. Prova match esatto cognome + nome insieme
+        if len(parts) >= 2:
+            # Cognome esatto + nome che inizia con
+            exact_match = await db.patients.find_one({
+                "ambulatorio": ambulatorio,
+                "cognome": {"$regex": f"^{parts[0]}$", "$options": "i"},
+                "nome": {"$regex": f"^{parts[1]}", "$options": "i"}
+            })
+            if exact_match:
+                return exact_match
             
-        return await db.patients.find_one({
+            # Prova invertito (nome cognome invece di cognome nome)
+            exact_match = await db.patients.find_one({
+                "ambulatorio": ambulatorio,
+                "cognome": {"$regex": f"^{parts[1]}$", "$options": "i"},
+                "nome": {"$regex": f"^{parts[0]}", "$options": "i"}
+            })
+            if exact_match:
+                return exact_match
+        
+        # 3. Match parziale su cognome (per abbreviazioni)
+        partial_match = await db.patients.find_one({
             "ambulatorio": ambulatorio,
-            "$or": query_parts
+            "cognome": {"$regex": f"^{parts[0]}", "$options": "i"}
         })
+        if partial_match:
+            return partial_match
+        
+        # 4. Ultima risorsa: cerca in tutti i campi ma con AND invece di OR
+        # Tutti i termini devono essere presenti nel cognome+nome combinato
+        pipeline = [
+            {"$match": {"ambulatorio": ambulatorio}},
+            {"$addFields": {
+                "full_name": {"$concat": [{"$toLower": "$cognome"}, " ", {"$toLower": "$nome"}]}
+            }},
+            {"$match": {
+                "$and": [{"full_name": {"$regex": part, "$options": "i"}} for part in parts]
+            }},
+            {"$limit": 1}
+        ]
+        
+        results = await db.patients.aggregate(pipeline).to_list(1)
+        if results:
+            return results[0]
+        
+        return None
     
     # Helper per trovare primo slot disponibile
     async def find_available_slot(data: str, tipo: str, turno: str = "primo_disponibile"):
