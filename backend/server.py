@@ -3022,13 +3022,15 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
         if not parts:
             return None
         
+        projection = {"_id": 0}  # Escludi sempre _id
+        
         # 1. Prima prova match esatto su cognome (primo termine)
         if len(parts) >= 1:
             # Prova il primo termine come cognome esatto
             exact_match = await db.patients.find_one({
                 "ambulatorio": ambulatorio,
                 "cognome": {"$regex": f"^{parts[0]}$", "$options": "i"}
-            })
+            }, projection)
             if exact_match:
                 # Se c'è un secondo termine, verifica che corrisponda al nome
                 if len(parts) >= 2:
@@ -3045,7 +3047,7 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
                 "ambulatorio": ambulatorio,
                 "cognome": {"$regex": f"^{parts[0]}$", "$options": "i"},
                 "nome": {"$regex": f"^{parts[1]}", "$options": "i"}
-            })
+            }, projection)
             if exact_match:
                 return exact_match
             
@@ -3054,7 +3056,7 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
                 "ambulatorio": ambulatorio,
                 "cognome": {"$regex": f"^{parts[1]}$", "$options": "i"},
                 "nome": {"$regex": f"^{parts[0]}", "$options": "i"}
-            })
+            }, projection)
             if exact_match:
                 return exact_match
         
@@ -3062,7 +3064,7 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
         partial_match = await db.patients.find_one({
             "ambulatorio": ambulatorio,
             "cognome": {"$regex": f"^{parts[0]}", "$options": "i"}
-        })
+        }, projection)
         if partial_match:
             return partial_match
         
@@ -3076,6 +3078,7 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             {"$match": {
                 "$and": [{"full_name": {"$regex": part, "$options": "i"}} for part in parts]
             }},
+            {"$project": {"_id": 0, "full_name": 0}},  # Escludi _id e campo temporaneo
             {"$limit": 1}
         ]
         
