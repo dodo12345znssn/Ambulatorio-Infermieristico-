@@ -56,10 +56,15 @@ The user wants to enhance a nursing ambulatory management application with featu
 - ✅ Multi-ambulatorio support
 - ✅ User authentication (JWT)
 
-### Bug Fixes (January 11, 2026)
+## Bug Fixes (January 11, 2026)
 - ✅ Fixed "Errore nel caricamento dei dati" toast appearing on all pages
 - ✅ Improved error handling to only show network errors
 - ✅ Fixed PatientDetailPage Select component issue
+- ✅ Added `/health` endpoint for Kubernetes health checks
+- ✅ Improved MongoDB connection with timeout and retry for Atlas
+- ✅ Dashboard now shows loading skeleton instead of "0" during data fetch
+- ✅ Removed "N/A" display for missing codice_fiscale in Prescrizioni
+- ✅ Added 30s timeout to API client to prevent app freezing
 
 ## Prioritized Backlog
 
