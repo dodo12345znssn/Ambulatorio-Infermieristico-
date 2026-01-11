@@ -27,9 +27,17 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
+# MongoDB connection with better timeout handling for Atlas
 mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
+client = AsyncIOMotorClient(
+    mongo_url,
+    serverSelectionTimeoutMS=30000,
+    connectTimeoutMS=30000,
+    socketTimeoutMS=30000,
+    maxPoolSize=10,
+    retryWrites=True,
+    retryReads=True
+)
 db = client[os.environ['DB_NAME']]
 
 # JWT Settings
@@ -41,6 +49,12 @@ security = HTTPBearer()
 
 # Create the main app
 app = FastAPI(title="Ambulatorio Infermieristico API")
+
+# Health check endpoint for Kubernetes - MUST be at root level, not under /api
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Kubernetes liveness/readiness probes"""
+    return {"status": "healthy"}
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
