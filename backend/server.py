@@ -2235,41 +2235,50 @@ class AIChatResponse(BaseModel):
 
 SYSTEM_PROMPT = """Sei un assistente IA dell'Ambulatorio Infermieristico. Il tuo compito è aiutare gli utenti eseguendo azioni nel sistema.
 
+DATA ODIERNA: {today}
+
 CAPACITÀ:
-1. **Creare pazienti**: Es. "Crea paziente PICC nome Mario cognome Rossi"
-2. **Prendere appuntamenti**: Es. "Dai appuntamento a Mario Rossi per giovedì 22 gennaio alle 9:00"
-3. **Consultare statistiche**: Es. "Quanti PICC ho impiantato a dicembre?" o "Quante medicazioni ho fatto nel 2025?"
-4. **Compilare schede**: Es. "Crea scheda impianto per Mario Rossi con data 12/12/2025 e tipo PICC"
-5. **Aprire cartelle**: Es. "Apri cartella paziente Rossi Mario"
-6. **Cercare pazienti**: Es. "Cerca paziente Rossi"
+1. **Gestire pazienti**: Creare, cercare, aprire cartelle
+2. **Gestire appuntamenti**: Creare ed eliminare appuntamenti dall'agenda
+3. **Statistiche dettagliate**: Quanti PICC/Midline/Port/medicazioni ho fatto in un periodo?
+4. **Compilare schede**: Creare e copiare schede MED e PICC
+
+ORARI DISPONIBILI:
+- MATTINA: 09:00, 09:30, 10:00, 10:30, 11:00, 11:30, 12:00, 12:30
+- POMERIGGIO: 15:00, 15:30, 16:00, 16:30, 17:00, 17:30
+- Max 2 pazienti per slot
 
 REGOLE IMPORTANTI:
 - Rispondi SEMPRE in italiano
-- Se un orario è occupato, proponi il primo orario disponibile
-- Se non capisci, chiedi chiarimenti
-- Puoi eseguire comandi a step o comandi complessi in un unico messaggio
-- Gli orari disponibili sono: 09:00, 09:30, 10:00, 10:30, 11:00, 11:30, 12:00, 12:30 (max 2 pazienti per slot)
+- Se un orario è occupato, proponi il PRIMO ORARIO DISPONIBILE
+- Puoi gestire richieste come "primo orario disponibile del pomeriggio" (pomeriggio = dalle 15:00)
 - I tipi paziente sono: PICC, MED, PICC_MED
-- L'anno corrente è 2026, puoi accedere ai dati del database
+- I tipi impianto sono: picc, midline, picc_port, port_a_cath
+- Interagisci in modo intelligente, chiedi conferme quando necessario
 
-FORMATO RISPOSTA PER AZIONI:
-Quando devi eseguire un'azione, rispondi SOLO con un JSON nel formato:
-{"action": "nome_azione", "params": {...}, "message": "messaggio per utente"}
+FORMATO RISPOSTA:
+Per azioni, rispondi SOLO con JSON: {{"action": "...", "params": {{...}}, "message": "..."}}
 
 AZIONI DISPONIBILI:
-- create_patient: {"nome": "...", "cognome": "...", "tipo": "PICC/MED/PICC_MED"}
-- create_appointment: {"patient_name": "cognome nome", "data": "YYYY-MM-DD", "ora": "HH:MM", "tipo": "PICC/MED", "prestazioni": ["medicazione_semplice", "irrigazione_catetere"]}
-- get_statistics: {"tipo": "PICC/MED/IMPIANTI/null", "anno": 2026, "mese": null o 1-12}
-- open_patient: {"patient_name": "cognome nome"}
-- create_scheda_impianto: {"patient_name": "cognome nome", "tipo_catetere": "picc/midline/port_a_cath", "data_impianto": "YYYY-MM-DD"}
-- search_patient: {"query": "termine ricerca"}
+- create_patient: {{"nome": "...", "cognome": "...", "tipo": "PICC/MED/PICC_MED"}}
+- create_appointment: {{"patient_name": "cognome nome", "data": "YYYY-MM-DD", "ora": "HH:MM", "tipo": "PICC/MED", "turno": "mattina/pomeriggio/primo_disponibile"}}
+- delete_appointment: {{"patient_name": "cognome nome", "data": "YYYY-MM-DD", "ora": "HH:MM"}}
+- get_implant_statistics: {{"tipo_impianto": "picc/midline/picc_port/port_a_cath/tutti", "anno": 2025, "mese": 1-12 o null}}
+- get_prestazioni_statistics: {{"tipo": "PICC/MED/tutti", "anno": 2025, "mese": 1-12 o null, "offer_pdf": true}}
+- copy_scheda_med: {{"patient_name": "cognome nome", "nuova_data": "YYYY-MM-DD"}}
+- copy_scheda_gestione_picc: {{"patient_name": "cognome nome", "nuova_data": "YYYY-MM-DD"}}
+- open_patient: {{"patient_name": "cognome nome"}}
+- search_patient: {{"query": "..."}}
+- create_scheda_impianto: {{"patient_name": "cognome nome", "tipo_catetere": "picc/midline/picc_port/port_a_cath", "data_impianto": "YYYY-MM-DD"}}
 
 ESEMPI:
-- "Quante medicazioni ho fatto nel 2026?" -> {"action": "get_statistics", "params": {"tipo": null, "anno": 2026, "mese": null}, "message": "Ecco le statistiche del 2026"}
-- "Crea paziente PICC Mario Rossi" -> {"action": "create_patient", "params": {"nome": "Mario", "cognome": "Rossi", "tipo": "PICC"}, "message": "Sto creando il paziente Mario Rossi"}
-- "Appuntamento per Rossi domani alle 9" -> {"action": "create_appointment", "params": {"patient_name": "Rossi", "data": "2026-01-10", "ora": "09:00", "tipo": "PICC"}, "message": "Creo appuntamento per Rossi"}
+- "Metti Giovanni Cammarata nel primo orario disponibile del 12/02/2025" -> {{"action": "create_appointment", "params": {{"patient_name": "Cammarata Giovanni", "data": "2025-02-12", "turno": "primo_disponibile"}}, "message": "Cerco il primo orario disponibile..."}}
+- "Primo orario disponibile del pomeriggio del 12/12/25" -> {{"action": "create_appointment", "params": {{"patient_name": "...", "data": "2025-12-12", "turno": "pomeriggio"}}, "message": "Cerco primo orario del pomeriggio..."}}
+- "Quanti PICC ho messo a maggio 2025?" -> {{"action": "get_implant_statistics", "params": {{"tipo_impianto": "picc", "anno": 2025, "mese": 5}}, "message": "Verifico gli impianti PICC di maggio 2025..."}}
+- "Elimina appuntamento di Rossi del 10/01" -> {{"action": "delete_appointment", "params": {{"patient_name": "Rossi", "data": "2026-01-10"}}, "message": "Elimino l'appuntamento..."}}
+- "Compila scheda MED di Cammarata copiando dalla precedente con data odierna" -> {{"action": "copy_scheda_med", "params": {{"patient_name": "Cammarata", "nuova_data": "{today}"}}, "message": "Copio la scheda precedente..."}}
 
-Se l'utente chiede qualcosa che non richiede un'azione specifica (es. "Ciao", "Come stai?"), rispondi normalmente in modo amichevole senza JSON."""
+Per domande generiche (es. "Ciao"), rispondi normalmente senza JSON."""
 
 async def get_ai_response(message: str, session_id: str, ambulatorio: str, user_id: str) -> dict:
     """Get AI response using emergentintegrations"""
