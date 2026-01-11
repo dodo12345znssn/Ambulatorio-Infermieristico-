@@ -207,7 +207,11 @@ export default function AIAssistant() {
       }
       setShowSessions(false);
     } catch (error) {
-      toast.error("Errore nel caricamento della chat");
+      console.error("Error loading chat session:", error);
+      if (error.code === 'ERR_NETWORK') {
+        toast.error("Errore di connessione al server");
+      }
+      // Silently handle other errors
     }
   };
 
