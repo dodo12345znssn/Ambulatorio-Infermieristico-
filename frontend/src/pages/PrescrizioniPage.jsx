@@ -489,7 +489,9 @@ export default function PrescrizioniPage() {
                           </Badge>
                         </div>
                         <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1">
-                          <span className="font-mono">{patient.codice_fiscale || "N/A"}</span>
+                          {patient.codice_fiscale && (
+                            <span className="font-mono">{patient.codice_fiscale}</span>
+                          )}
                           {prescrizione && (
                             <span className="flex items-center gap-1">
                               <Calendar className="w-3 h-3" />
