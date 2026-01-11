@@ -3050,8 +3050,17 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             if not patient:
                 return {"success": False, "message": f"❌ Paziente '{patient_name}' non trovato"}
             
-            if patient.get("status") == "sospeso":
+            previous_status = patient.get("status", "in_cura")
+            
+            if previous_status == "sospeso":
                 return {"success": False, "message": f"⚠️ Il paziente **{patient['cognome']} {patient['nome']}** è già sospeso"}
+            
+            # Salva per undo
+            await save_undo_action(
+                user_id, ambulatorio, "suspend_patient",
+                f"Sospeso paziente {patient['cognome']} {patient['nome']}",
+                {"patient_id": patient["id"], "previous_status": previous_status}
+            )
             
             await db.patients.update_one(
                 {"id": patient["id"]},
@@ -3059,7 +3068,8 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             )
             
             return {"success": True, 
-                    "message": f"✅ Paziente sospeso!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📋 Stato: Sospeso\n\nIl paziente è stato temporaneamente sospeso."}
+                    "message": f"✅ Paziente sospeso!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📋 Stato: Sospeso\n\nIl paziente è stato temporaneamente sospeso.\n\n💡 Puoi annullare dicendo 'annulla'",
+                    "can_undo": True}
         
         # ==================== RESUME PATIENT ====================
         elif action_type == "resume_patient":
@@ -3069,8 +3079,17 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             if not patient:
                 return {"success": False, "message": f"❌ Paziente '{patient_name}' non trovato"}
             
-            if patient.get("status") == "in_cura":
+            previous_status = patient.get("status", "sospeso")
+            
+            if previous_status == "in_cura":
                 return {"success": False, "message": f"⚠️ Il paziente **{patient['cognome']} {patient['nome']}** è già in cura"}
+            
+            # Salva per undo
+            await save_undo_action(
+                user_id, ambulatorio, "resume_patient",
+                f"Ripreso in cura paziente {patient['cognome']} {patient['nome']}",
+                {"patient_id": patient["id"], "previous_status": previous_status}
+            )
             
             await db.patients.update_one(
                 {"id": patient["id"]},
@@ -3078,7 +3097,8 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             )
             
             return {"success": True, 
-                    "message": f"✅ Paziente ripreso in cura!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📋 Stato: In cura\n\nIl paziente è stato ripreso in cura."}
+                    "message": f"✅ Paziente ripreso in cura!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📋 Stato: In cura\n\nIl paziente è stato ripreso in cura.\n\n💡 Puoi annullare dicendo 'annulla'",
+                    "can_undo": True}
         
         # ==================== DISCHARGE PATIENT ====================
         elif action_type == "discharge_patient":
@@ -3088,8 +3108,18 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             if not patient:
                 return {"success": False, "message": f"❌ Paziente '{patient_name}' non trovato"}
             
-            if patient.get("status") == "dimesso":
+            previous_status = patient.get("status", "in_cura")
+            previous_data = {"data_dimissione": patient.get("data_dimissione")}
+            
+            if previous_status == "dimesso":
                 return {"success": False, "message": f"⚠️ Il paziente **{patient['cognome']} {patient['nome']}** è già dimesso"}
+            
+            # Salva per undo
+            await save_undo_action(
+                user_id, ambulatorio, "discharge_patient",
+                f"Dimesso paziente {patient['cognome']} {patient['nome']}",
+                {"patient_id": patient["id"], "previous_status": previous_status, "previous_data": previous_data}
+            )
             
             await db.patients.update_one(
                 {"id": patient["id"]},
@@ -3097,7 +3127,8 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             )
             
             return {"success": True, 
-                    "message": f"✅ Paziente dimesso!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📋 Stato: Dimesso\n📅 Data dimissione: {datetime.now().strftime('%d/%m/%Y')}\n\nIl paziente è stato dimesso."}
+                    "message": f"✅ Paziente dimesso!\n\n👤 **{patient['cognome']} {patient['nome']}**\n📋 Stato: Dimesso\n📅 Data dimissione: {datetime.now().strftime('%d/%m/%Y')}\n\nIl paziente è stato dimesso.\n\n💡 Puoi annullare dicendo 'annulla'",
+                    "can_undo": True}
         
         # ==================== DELETE PATIENT ====================
         elif action_type == "delete_patient":
@@ -3110,6 +3141,28 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             patient_id = patient["id"]
             nome_completo = f"{patient['cognome']} {patient['nome']}"
             
+            # Recupera tutti i dati correlati PRIMA di eliminarli (per undo)
+            patient_data = {k: v for k, v in patient.items() if k != "_id"}
+            appointments = await db.appointments.find({"patient_id": patient_id}, {"_id": 0}).to_list(1000)
+            schede_impianto = await db.schede_impianto_picc.find({"patient_id": patient_id}, {"_id": 0}).to_list(100)
+            schede_gestione = await db.schede_gestione_picc.find({"patient_id": patient_id}, {"_id": 0}).to_list(100)
+            schede_med = await db.schede_medicazione_med.find({"patient_id": patient_id}, {"_id": 0}).to_list(100)
+            prescrizioni_list = await db.prescrizioni.find({"patient_id": patient_id}, {"_id": 0}).to_list(100)
+            
+            # Salva per undo
+            await save_undo_action(
+                user_id, ambulatorio, "delete_patient",
+                f"Eliminato paziente {nome_completo}",
+                {
+                    "patient_data": patient_data,
+                    "appointments": appointments,
+                    "schede_impianto": schede_impianto,
+                    "schede_gestione": schede_gestione,
+                    "schede_med": schede_med,
+                    "prescrizioni": prescrizioni_list
+                }
+            )
+            
             # Delete all related data
             await db.appointments.delete_many({"patient_id": patient_id})
             await db.schede_impianto_picc.delete_many({"patient_id": patient_id})
@@ -3119,7 +3172,8 @@ async def execute_ai_action(action: dict, ambulatorio: str, user_id: str) -> dic
             await db.patients.delete_one({"id": patient_id})
             
             return {"success": True, 
-                    "message": f"✅ Paziente eliminato definitivamente!\n\n👤 **{nome_completo}**\n\n⚠️ Tutti i dati del paziente sono stati eliminati (appuntamenti, schede, prescrizioni)."}
+                    "message": f"✅ Paziente eliminato definitivamente!\n\n👤 **{nome_completo}**\n\n⚠️ Tutti i dati del paziente sono stati eliminati.\n\n💡 **IMPORTANTE**: Puoi ancora annullare questa azione dicendo 'annulla'!",
+                    "can_undo": True}
         
         # ==================== COMPARE STATISTICS ====================
         elif action_type == "compare_statistics":
